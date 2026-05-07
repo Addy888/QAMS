@@ -1,4 +1,5 @@
-import { Download, Plus } from "lucide-react";
+import { useState } from "react";
+import { Download, UserPlus } from "lucide-react";
 import PageContainer from "@/layouts/PageContainer";
 import { WelcomeHeader } from "@/features/dashboard/components/WelcomeHeader";
 import { StatGrid } from "@/features/dashboard/components/StatGrid";
@@ -7,8 +8,13 @@ import { PerformancePlaceholder } from "@/features/dashboard/components/Performa
 import { ADMIN_STATS, RECENT_ACTIVITY } from "@/features/dashboard/mock";
 import { AppCard } from "@/components/ui/AppCard";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
+import { AddUserDialog } from "@/features/users/components/AddUserDialog";
 
 export default function AdminDashboard() {
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  // Bumped after a successful create so child fetchers can re-run later.
+  const [, setRefreshKey] = useState(0);
+
   return (
     <PageContainer maxWidth="xl">
       <WelcomeHeader
@@ -19,8 +25,11 @@ export default function AdminDashboard() {
             <button className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg">
               <Download className="h-4 w-4" /> Export
             </button>
-            <button className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90">
-              <Plus className="h-4 w-4" /> Invite user
+            <button
+              onClick={() => setAddUserOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90"
+            >
+              <UserPlus className="h-4 w-4" /> Add user
             </button>
           </>
         }
@@ -53,6 +62,13 @@ export default function AdminDashboard() {
       <div className="mt-6">
         <RecentActivityCard rows={RECENT_ACTIVITY} />
       </div>
+
+      <AddUserDialog
+        open={addUserOpen}
+        onOpenChange={setAddUserOpen}
+        actorRole="ADMIN"
+        onCreated={() => setRefreshKey((k) => k + 1)}
+      />
     </PageContainer>
   );
 }

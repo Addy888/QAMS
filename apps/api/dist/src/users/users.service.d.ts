@@ -1,4 +1,15 @@
 import { PrismaService } from "../prisma/prisma.service";
+import type { CreateUserDto } from "./dto/create-user.dto";
+import { Role } from "../auth/role.enum";
+export type SafeUser = {
+    id: string;
+    username: string;
+    name: string;
+    role: Role;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+};
 export declare class UsersService {
     private prisma;
     constructor(prisma: PrismaService);
@@ -12,11 +23,12 @@ export declare class UsersService {
         createdAt: Date;
         updatedAt: Date;
     } | null>;
+    createUserAsActor(actorRole: Role, dto: CreateUserDto): Promise<SafeUser>;
     createUser(data: {
         username: string;
         passwordHash: string;
         name: string;
-        role: "ADMIN" | "SUPERVISOR" | "AGENT";
+        role: Role;
     }): Promise<{
         id: string;
         username: string;

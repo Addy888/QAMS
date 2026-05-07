@@ -1,4 +1,5 @@
-import { ClipboardList, Filter } from "lucide-react";
+import { useState } from "react";
+import { ClipboardList, Filter, UserPlus } from "lucide-react";
 import PageContainer from "@/layouts/PageContainer";
 import { WelcomeHeader } from "@/features/dashboard/components/WelcomeHeader";
 import { StatGrid } from "@/features/dashboard/components/StatGrid";
@@ -7,8 +8,12 @@ import { PerformancePlaceholder } from "@/features/dashboard/components/Performa
 import { SUPERVISOR_STATS, RECENT_ACTIVITY } from "@/features/dashboard/mock";
 import { AppCard } from "@/components/ui/AppCard";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AddUserDialog } from "@/features/users/components/AddUserDialog";
 
 export default function SupervisorDashboard() {
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [, setRefreshKey] = useState(0);
+
   return (
     <PageContainer maxWidth="xl">
       <WelcomeHeader
@@ -19,8 +24,14 @@ export default function SupervisorDashboard() {
             <button className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg">
               <Filter className="h-4 w-4" /> Filters
             </button>
-            <button className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90">
+            <button className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg">
               <ClipboardList className="h-4 w-4" /> New audit
+            </button>
+            <button
+              onClick={() => setAddUserOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90"
+            >
+              <UserPlus className="h-4 w-4" /> Add agent
             </button>
           </>
         }
@@ -56,6 +67,13 @@ export default function SupervisorDashboard() {
       <div className="mt-6">
         <RecentActivityCard rows={RECENT_ACTIVITY} />
       </div>
+
+      <AddUserDialog
+        open={addUserOpen}
+        onOpenChange={setAddUserOpen}
+        actorRole="SUPERVISOR"
+        onCreated={() => setRefreshKey((k) => k + 1)}
+      />
     </PageContainer>
   );
 }
