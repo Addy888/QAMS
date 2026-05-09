@@ -37,13 +37,16 @@ export interface ListAuditParams {
 }
 
 function toQueryParams(
-  p: Record<string, string | number | boolean | undefined>,
+  p: object,
 ): Record<string, string> {
   const out: Record<string, string> = {};
+
   for (const [k, v] of Object.entries(p)) {
-    if (v === undefined) continue;
+    if (v === undefined || v === null) continue;
+
     out[k] = String(v);
   }
+
   return out;
 }
 
@@ -95,5 +98,14 @@ export async function reopenAudit(
   const res = await api.patch<AuditDetail>(`/audits/${id}/reopen`, {
     reason,
   });
+  return res.data;
+}
+
+/**
+ * Publish a SUBMITTED audit so the agent can see it. Locks the audit
+ * for everyone after this point.
+ */
+export async function publishAudit(id: number): Promise<AuditDetail> {
+  const res = await api.patch<AuditDetail>(`/audits/${id}/publish`);
   return res.data;
 }

@@ -20,6 +20,10 @@ export interface AuditListItem {
   createdAt: Date;
   updatedAt: Date;
   submittedAt: Date | null;
+  publishedAt: Date | null;
+  reviewedAt: Date | null;
+  acknowledged: boolean;
+  /** Legacy column — null on all newly-created audits. */
   completedAt: Date | null;
 }
 

@@ -9,7 +9,7 @@ export interface CreateUserPayload {
   role: Exclude<UserRole, "ADMIN">;
 }
 
-export interface CreatedUser {
+export interface ManagedUser {
   id: string;
   username: string;
   name: string;
@@ -19,7 +19,25 @@ export interface CreatedUser {
   updatedAt: string;
 }
 
-export async function createUser(payload: CreateUserPayload): Promise<CreatedUser> {
-  const response = await api.post<CreatedUser>("/users", payload);
+/** Backwards-compat alias — kept so existing imports don't break. */
+export type CreatedUser = ManagedUser;
+
+export async function createUser(
+  payload: CreateUserPayload,
+): Promise<ManagedUser> {
+  const response = await api.post<ManagedUser>("/users", payload);
+  return response.data;
+}
+
+/**
+ * List users — optionally filter by role. The backend already exposes
+ * this endpoint for both Admin and Supervisor scopes; the Admin Users
+ * page hits it without a role filter, the Supervisor Agents page
+ * passes `role=AGENT`.
+ */
+export async function listUsers(role?: UserRole): Promise<ManagedUser[]> {
+  const response = await api.get<ManagedUser[]>("/users", {
+    params: role ? { role } : {},
+  });
   return response.data;
 }

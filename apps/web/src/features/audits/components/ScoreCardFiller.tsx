@@ -23,6 +23,8 @@ interface ScoreCardFillerProps {
   onAnswer: (questionId: number, value: string | null) => void;
   onAnswerRemark: (questionId: number, remark: string) => void;
   onSectionRemark: (sectionId: number, remark: string) => void;
+  /** When true, all inputs are disabled — used for published audits. */
+  readOnly?: boolean;
 }
 
 const fieldClass = cn(
@@ -38,6 +40,7 @@ export function ScoreCardFiller({
   onAnswer,
   onAnswerRemark,
   onSectionRemark,
+  readOnly = false,
 }: ScoreCardFillerProps) {
   return (
     <div className="flex flex-col gap-5">
@@ -47,6 +50,7 @@ export function ScoreCardFiller({
           section={section}
           answers={answers}
           sectionRemark={sectionRemarks[section.id] ?? ""}
+          readOnly={readOnly}
           onAnswer={onAnswer}
           onAnswerRemark={onAnswerRemark}
           onSectionRemark={onSectionRemark}
@@ -60,11 +64,12 @@ function SectionBlock(props: {
   section: AuditSection;
   answers: AnswerDraftMap;
   sectionRemark: string;
+  readOnly: boolean;
   onAnswer: (questionId: number, value: string | null) => void;
   onAnswerRemark: (questionId: number, remark: string) => void;
   onSectionRemark: (sectionId: number, remark: string) => void;
 }) {
-  const { section, answers, sectionRemark } = props;
+  const { section, answers, sectionRemark, readOnly } = props;
 
   const answeredCount = useMemo(
     () =>
@@ -99,6 +104,7 @@ function SectionBlock(props: {
             key={q.id}
             question={q}
             draft={answers[q.id]}
+            readOnly={readOnly}
             onAnswer={props.onAnswer}
             onAnswerRemark={props.onAnswerRemark}
           />
@@ -113,9 +119,11 @@ function SectionBlock(props: {
             value={sectionRemark}
             onChange={(e) => props.onSectionRemark(section.id, e.target.value)}
             placeholder="Optional notes for this section…"
+            disabled={readOnly}
             className={cn(
               fieldClass,
               "mt-1 h-auto resize-none py-2 leading-relaxed",
+              readOnly && "cursor-not-allowed opacity-70",
             )}
           />
         </div>
@@ -127,11 +135,13 @@ function SectionBlock(props: {
 function QuestionRow({
   question,
   draft,
+  readOnly,
   onAnswer,
   onAnswerRemark,
 }: {
   question: AuditQuestion;
   draft?: AnswerDraft;
+  readOnly: boolean;
   onAnswer: (questionId: number, value: string | null) => void;
   onAnswerRemark: (questionId: number, remark: string) => void;
 }) {
@@ -171,6 +181,7 @@ function QuestionRow({
         <AnswerInput
           question={question}
           value={value}
+          readOnly={readOnly}
           onChange={(next) => onAnswer(question.id, next)}
         />
       </div>
@@ -180,7 +191,11 @@ function QuestionRow({
           value={remark}
           onChange={(e) => onAnswerRemark(question.id, e.target.value)}
           placeholder="Add a remark (optional)"
-          className={fieldClass}
+          disabled={readOnly}
+          className={cn(
+            fieldClass,
+            readOnly && "cursor-not-allowed opacity-70",
+          )}
         />
       </div>
     </div>
@@ -190,31 +205,42 @@ function QuestionRow({
 function AnswerInput({
   question,
   value,
+  readOnly,
   onChange,
 }: {
   question: AuditQuestion;
   value: string;
+  readOnly: boolean;
   onChange: (next: string | null) => void;
 }) {
+  const ro = readOnly ? "cursor-not-allowed opacity-70" : "";
+
   if (question.type === AuditQuestionType.YES_NO) {
     return (
       <div className="flex flex-wrap gap-2">
         {["yes", "no", "na"].map((opt) => {
           const active = value === opt;
+          // Active tone:    Yes → green, No → red, N/A → yellow/warning
+          // Inactive tone:  matched accent stays subtle so the chip
+          //                 still hints at its meaning.
+          const activeClass =
+            opt === "yes"
+              ? "border-success/40 bg-success/15 text-success"
+              : opt === "no"
+                ? "border-danger/40 bg-danger/15 text-danger"
+                : "border-warning/40 bg-warning/15 text-warning";
           return (
             <button
               key={opt}
               type="button"
+              disabled={readOnly}
               onClick={() => onChange(active ? null : opt)}
               className={cn(
                 "h-8 rounded-md border px-3 text-xs font-medium transition-colors",
                 active
-                  ? opt === "yes"
-                    ? "border-success/40 bg-success/15 text-success"
-                    : opt === "no"
-                      ? "border-danger/40 bg-danger/15 text-danger"
-                      : "border-border bg-bg-muted text-fg-muted"
+                  ? activeClass
                   : "border-border bg-surface text-fg-muted hover:bg-bg-muted",
+                ro,
               )}
             >
               {opt === "na" ? "N/A" : opt[0].toUpperCase() + opt.slice(1)}
@@ -235,12 +261,14 @@ function AnswerInput({
             <button
               key={o.label}
               type="button"
+              disabled={readOnly}
               onClick={() => onChange(active ? null : o.label)}
               className={cn(
                 "h-8 rounded-md border px-3 text-xs font-medium transition-colors",
                 active
                   ? "border-accent/40 bg-accent/15 text-accent"
                   : "border-border bg-surface text-fg-muted hover:bg-bg-muted",
+                ro,
               )}
             >
               {o.label}
@@ -261,12 +289,14 @@ function AnswerInput({
             <button
               key={o.score}
               type="button"
+              disabled={readOnly}
               onClick={() => onChange(active ? null : String(o.score))}
               className={cn(
                 "h-8 w-8 rounded-md border text-xs font-medium transition-colors",
                 active
                   ? "border-accent/40 bg-accent/15 text-accent"
                   : "border-border bg-surface text-fg-muted hover:bg-bg-muted",
+                ro,
               )}
             >
               {o.score}
@@ -283,7 +313,12 @@ function AnswerInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder="Type the supervisor's notes…"
-      className={cn(fieldClass, "h-auto resize-none py-2 leading-relaxed")}
+      disabled={readOnly}
+      className={cn(
+        fieldClass,
+        "h-auto resize-none py-2 leading-relaxed",
+        ro,
+      )}
     />
   );
 }

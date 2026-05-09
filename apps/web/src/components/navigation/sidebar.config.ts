@@ -1,11 +1,7 @@
 import {
   LayoutDashboard,
   Users,
-  ShieldCheck,
-  Settings,
   ClipboardList,
-  PhoneCall,
-  BarChart3,
   Trophy,
   History,
   FolderKanban,
@@ -31,9 +27,7 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
       heading: "Administration",
       items: [
         { label: "Users", path: "/admin/users", icon: Users },
-        { label: "Roles", path: "/admin/roles", icon: ShieldCheck },
         { label: "Scorecards", path: "/admin/scorecards", icon: ClipboardList },
-        { label: "Settings", path: "/admin/settings", icon: Settings },
       ],
     },
   ],
@@ -56,8 +50,6 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
       heading: "Operations",
       items: [
         { label: "Audits", path: "/supervisor/audits", icon: ClipboardList },
-        { label: "Calls", path: "/supervisor/calls", icon: PhoneCall },
-        { label: "Reports", path: "/supervisor/reports", icon: BarChart3 },
       ],
     },
   ],
@@ -72,8 +64,13 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
     {
       heading: "Performance",
       items: [
+        { label: "My Audits", path: "/agent/audits", icon: ClipboardList },
         { label: "My Scores", path: "/agent/scores", icon: Trophy },
-        { label: "Audit History", path: "/agent/audits", icon: History },
+        {
+          label: "Audit History",
+          path: "/agent/audits?lens=REVIEWED",
+          icon: History,
+        },
       ],
     },
   ],

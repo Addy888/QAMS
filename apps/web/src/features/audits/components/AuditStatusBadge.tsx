@@ -6,6 +6,8 @@ const TONE: Record<AuditStatus, StatusTone> = {
   [AuditStatus.DRAFT]: "neutral",
   [AuditStatus.IN_PROGRESS]: "info",
   [AuditStatus.SUBMITTED]: "purple",
+  [AuditStatus.PUBLISHED]: "success",
+  [AuditStatus.REVIEWED]: "success",
   [AuditStatus.COMPLETED]: "success",
 };
 
@@ -13,6 +15,8 @@ const LABEL: Record<AuditStatus, string> = {
   [AuditStatus.DRAFT]: "Draft",
   [AuditStatus.IN_PROGRESS]: "In progress",
   [AuditStatus.SUBMITTED]: "Submitted",
+  [AuditStatus.PUBLISHED]: "Published",
+  [AuditStatus.REVIEWED]: "Reviewed",
   [AuditStatus.COMPLETED]: "Completed",
 };
 

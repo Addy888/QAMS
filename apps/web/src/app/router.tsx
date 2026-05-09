@@ -10,6 +10,9 @@ import ProjectsPage from "@/pages/supervisor/ProjectsPage";
 import AgentsPage from "@/pages/supervisor/AgentsPage";
 import AuditsPage from "@/pages/supervisor/AuditsPage";
 import ScorecardsPage from "@/pages/admin/ScorecardsPage";
+import AdminUsersPage from "@/pages/admin/UsersPage";
+import MyAuditsPage from "@/pages/agent/MyAuditsPage";
+import AuditDetailPage from "@/pages/agent/AuditDetailPage";
 import { useAuthStore } from "@/features/auth/store/authStore";
 
 /** Send the user to their role's home, or to login if anonymous. */
@@ -49,6 +52,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={["ADMIN"]}>
             <AdminDashboard />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/admin/users",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <AdminUsersPage />
           </ProtectedRoute>
         ),
       },
@@ -97,6 +108,31 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={["AGENT"]}>
             <AgentDashboard />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/agent/audits",
+        element: (
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <MyAuditsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/agent/audits/:id",
+        element: (
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <AuditDetailPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        // "My Scores" sidebar entry — same view, score-focused lens.
+        path: "/agent/scores",
+        element: (
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <MyAuditsPage />
           </ProtectedRoute>
         ),
       },

@@ -9,6 +9,8 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { Role } from "../auth/role.enum";
 import {
+  AGENT_VISIBLE_STATUSES,
+  AUDIT_IMMUTABLE_STATUSES,
   AUDIT_STATUS_TRANSITIONS,
   AuditQuestionType,
   AuditStatus,
@@ -114,11 +116,12 @@ export class AuditsService {
     }
 
     // Make sure we don't create a duplicate for the same call reference.
+    // Any existing audit for this agent+call (in any non-terminal status,
+    // including PUBLISHED/REVIEWED) blocks a new draft.
     const existing = await this.prisma.audit.findFirst({
       where: {
         agentId: dto.agentId,
         callReference: dto.callReference.trim(),
-        status: { not: AuditStatus.COMPLETED },
       },
     });
     if (existing) {
@@ -343,16 +346,69 @@ export class AuditsService {
       throw new ForbiddenException("Only the audit's supervisor can re-open it");
     }
 
+    // Only SUBMITTED audits can be re-opened. Once an audit is PUBLISHED
+    // it is locked — the supervisor cannot pull it back from the agent.
     if (audit.status !== AuditStatus.SUBMITTED) {
       throw new BadRequestException(
-        "Only submitted audits can be re-opened",
+        "Only submitted audits can be re-opened. Published audits are immutable.",
       );
     }
 
     await this.transitionStatus(audit.id, audit.status, AuditStatus.IN_PROGRESS);
     await this.prisma.audit.update({
       where: { id: audit.id },
-      data: { submittedAt: null, reviewedById: actor.id },
+      data: { submittedAt: null },
+    });
+
+    return this.getById(audit.id, actor);
+  }
+
+  // -------------------------------------------------------------------
+  //  PUBLISH
+  // -------------------------------------------------------------------
+
+  /**
+   * Publish a SUBMITTED audit so the agent can see it. Locks the audit
+   * for everyone — no further answer / score / header edits allowed,
+   * and the audit cannot be re-opened. The agent's acknowledgement
+   * (handled by `AgentAuditsService.acknowledge`) is the only state
+   * change permitted afterwards.
+   */
+  async publish(
+    id: number,
+    actor: AuthorizedActor,
+  ): Promise<AuditDetailResponse> {
+    const audit = await this.prisma.audit.findUnique({ where: { id } });
+    if (!audit) throw new NotFoundException("Audit not found");
+
+    if (actor.role !== Role.SUPERVISOR || audit.supervisorId !== actor.id) {
+      throw new ForbiddenException(
+        "Only the audit's supervisor can publish it",
+      );
+    }
+
+    if (audit.status !== AuditStatus.SUBMITTED) {
+      throw new BadRequestException(
+        "Only submitted audits can be published. Submit the audit first.",
+      );
+    }
+
+    // Recompute and persist scores one last time so what the agent sees
+    // is exactly what was scored at publish time.
+    await this.recomputeAndPersistScore(audit.id);
+
+    await this.transitionStatus(
+      audit.id,
+      audit.status,
+      AuditStatus.PUBLISHED,
+    );
+
+    await this.prisma.audit.update({
+      where: { id: audit.id },
+      data: {
+        publishedAt: new Date(),
+        publishedById: actor.id,
+      },
     });
 
     return this.getById(audit.id, actor);
@@ -413,7 +469,7 @@ export class AuditsService {
     if (!row) throw new NotFoundException("Audit not found");
 
     // Authorization: supervisor must own it; agent may only view their own
-    // and only once it's submitted/completed (audit visibility rule).
+    // and only once it's PUBLISHED or REVIEWED (audit visibility rule).
     if (actor.role === Role.SUPERVISOR && row.supervisorId !== actor.id) {
       throw new ForbiddenException("Not your audit");
     }
@@ -421,10 +477,7 @@ export class AuditsService {
       if (row.agentId !== actor.id) {
         throw new ForbiddenException("Not your audit");
       }
-      if (
-        row.status !== AuditStatus.SUBMITTED &&
-        row.status !== AuditStatus.COMPLETED
-      ) {
+      if (!AGENT_VISIBLE_STATUSES.includes(row.status as AuditStatus)) {
         throw new ForbiddenException("Audit not yet released");
       }
     }
@@ -654,11 +707,15 @@ export class AuditsService {
       throw new ForbiddenException("Not your audit");
     }
     if (
-      audit.status === AuditStatus.SUBMITTED ||
-      audit.status === AuditStatus.COMPLETED
+      AUDIT_IMMUTABLE_STATUSES.includes(audit.status as AuditStatus)
     ) {
       throw new BadRequestException(
-        `Audit is ${audit.status} — re-open it before editing`,
+        `Audit is ${audit.status} — published audits are immutable`,
+      );
+    }
+    if (audit.status === AuditStatus.SUBMITTED) {
+      throw new BadRequestException(
+        `Audit is SUBMITTED — re-open it before editing`,
       );
     }
 
@@ -749,12 +806,15 @@ function toListItem(row: {
   totalScore: number | null;
   finalScore: number | null;
   fatalTriggered: boolean;
+  acknowledged: boolean;
   agent: { id: string; name: string; username: string };
   supervisor: { id: string; name: string; username: string };
   project: { id: number; projectName: string; groupName: string };
   createdAt: Date;
   updatedAt: Date;
   submittedAt: Date | null;
+  publishedAt: Date | null;
+  reviewedAt: Date | null;
   completedAt: Date | null;
 }): AuditListItem {
   return {
@@ -773,6 +833,9 @@ function toListItem(row: {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     submittedAt: row.submittedAt,
+    publishedAt: row.publishedAt,
+    reviewedAt: row.reviewedAt,
+    acknowledged: row.acknowledged,
     completedAt: row.completedAt,
   };
 }

@@ -8,9 +8,27 @@ export const AuditStatus = {
   DRAFT: "DRAFT",
   IN_PROGRESS: "IN_PROGRESS",
   SUBMITTED: "SUBMITTED",
+  /** Visible to the agent and immutable for everyone. */
+  PUBLISHED: "PUBLISHED",
+  /** Agent has acknowledged the audit. Terminal. */
+  REVIEWED: "REVIEWED",
+  /** Legacy — never assigned by new code, but old rows may still carry it. */
   COMPLETED: "COMPLETED",
 } as const;
 export type AuditStatus = (typeof AuditStatus)[keyof typeof AuditStatus];
+
+/** Statuses the agent is allowed to see. */
+export const AGENT_VISIBLE_STATUSES: AuditStatus[] = [
+  AuditStatus.PUBLISHED,
+  AuditStatus.REVIEWED,
+];
+
+/** Statuses in which the audit is locked / read-only for everyone. */
+export const AUDIT_IMMUTABLE_STATUSES: AuditStatus[] = [
+  AuditStatus.PUBLISHED,
+  AuditStatus.REVIEWED,
+  AuditStatus.COMPLETED,
+];
 
 export const AuditQuestionType = {
   YES_NO: "YES_NO",
@@ -43,12 +61,16 @@ export interface AuditListItem {
   totalScore: number | null;
   finalScore: number | null;
   fatalTriggered: boolean;
+  acknowledged: boolean;
   agent: AuditUserRef;
   supervisor: AuditUserRef;
   project: AuditProjectRef;
   createdAt: string;
   updatedAt: string;
   submittedAt: string | null;
+  publishedAt: string | null;
+  reviewedAt: string | null;
+  /** Legacy — null on all newly-created audits. */
   completedAt: string | null;
 }
 

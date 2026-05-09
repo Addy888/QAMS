@@ -2,17 +2,23 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ClipboardList,
   ClipboardPlus,
+  Eye,
   FileEdit,
+  Loader2,
   RefreshCw,
+  Send,
 } from "lucide-react";
+import { toast } from "sonner";
+import type { AxiosError } from "axios";
 import PageContainer from "@/layouts/PageContainer";
 import { AppCard } from "@/components/ui/AppCard";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
-import { cn } from "@/lib/utils";
-import { listAudits } from "@/features/audits/api";
+import { cn, formatDateTime } from "@/lib/utils";
+import { listAudits, publishAudit } from "@/features/audits/api";
 import {
+  AUDIT_IMMUTABLE_STATUSES,
   AuditStatus,
   type AuditDetail,
   type AuditListItem,
@@ -27,20 +33,9 @@ const STATUS_FILTERS: { label: string; value: StatusFilter }[] = [
   { label: "Drafts", value: AuditStatus.DRAFT },
   { label: "In progress", value: AuditStatus.IN_PROGRESS },
   { label: "Submitted", value: AuditStatus.SUBMITTED },
-  { label: "Completed", value: AuditStatus.COMPLETED },
+  { label: "Published", value: AuditStatus.PUBLISHED },
+  { label: "Reviewed", value: AuditStatus.REVIEWED },
 ];
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return iso.slice(0, 10);
-  }
-}
 
 function formatScore(value: number | null): string {
   if (value === null) return "—";
@@ -102,6 +97,8 @@ export default function AuditsPage() {
     });
   }, [audits, search]);
 
+  const [publishingId, setPublishingId] = useState<number | null>(null);
+
   const handleStartNew = () => {
     setResumingId(undefined);
     setWizardOpen(true);
@@ -121,6 +118,24 @@ export default function AuditsPage() {
     setWizardOpen(false);
     setResumingId(undefined);
     void fetchAudits();
+  };
+
+  const handlePublish = async (row: AuditListItem) => {
+    setPublishingId(row.id);
+    try {
+      const published = await publishAudit(row.id);
+      toast.success(
+        `Audit ${published.auditCode} published — agent can now see it`,
+      );
+      void fetchAudits();
+    } catch (e) {
+      const err = e as AxiosError<{ message?: string | string[] }>;
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw.join(", ") : raw;
+      toast.error(msg ?? "Could not publish audit");
+    } finally {
+      setPublishingId(null);
+    }
   };
 
   const columns: DataTableColumn<AuditListItem>[] = useMemo(
@@ -199,13 +214,70 @@ export default function AuditsPage() {
         header: "Updated",
         align: "right",
         cell: (row) => (
-          <span className="text-xs text-fg-subtle">
-            {formatDate(row.updatedAt)}
+          <span className="whitespace-nowrap text-xs text-fg-subtle">
+            {formatDateTime(row.updatedAt)}
           </span>
         ),
       },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        cell: (row) => {
+          const locked = AUDIT_IMMUTABLE_STATUSES.includes(row.status);
+          const canPublish = row.status === AuditStatus.SUBMITTED;
+          return (
+            <div
+              className="flex items-center justify-end gap-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {canPublish ? (
+                <button
+                  type="button"
+                  onClick={() => void handlePublish(row)}
+                  disabled={publishingId === row.id}
+                  className={cn(
+                    "inline-flex h-8 items-center gap-1 rounded-md border border-accent/40 bg-accent/15 px-2.5 text-xs font-medium text-accent",
+                    "hover:bg-accent/25 disabled:opacity-60",
+                  )}
+                >
+                  {publishingId === row.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                  Publish
+                </button>
+              ) : null}
+              {locked ? (
+                <button
+                  type="button"
+                  onClick={() => handleResume(row.id)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-bg-elevated px-2.5 text-xs font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  View
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleResume(row.id)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-bg-elevated px-2.5 text-xs font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+                >
+                  <FileEdit className="h-3.5 w-3.5" />
+                  Open
+                </button>
+              )}
+            </div>
+          );
+        },
+      },
     ],
-    [],
+    // handlePublish closes over publishingId; safe to leave inert here
+    // because we re-derive on every render and only the active row's
+    // spinner state matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [publishingId],
   );
 
   if (wizardOpen) {
@@ -331,14 +403,7 @@ export default function AuditsPage() {
           rowKey={(row) => row.id}
           loading={loading}
           loadingRows={5}
-          onRowClick={(row) => {
-            if (
-              row.status === AuditStatus.DRAFT ||
-              row.status === AuditStatus.IN_PROGRESS
-            ) {
-              handleResume(row.id);
-            }
-          }}
+          onRowClick={(row) => handleResume(row.id)}
           emptyState={
             <EmptyState
               icon={ClipboardList}

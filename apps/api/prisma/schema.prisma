@@ -24,12 +24,19 @@ enum ProjectStatus {
 }
 
 /// Audit lifecycle. Transitions are enforced server-side:
-///   DRAFT       → IN_PROGRESS → SUBMITTED → COMPLETED
-///   SUBMITTED   → IN_PROGRESS  (re-open by supervisor)
+///   DRAFT       → IN_PROGRESS → SUBMITTED → PUBLISHED → REVIEWED
+///   SUBMITTED   → IN_PROGRESS  (re-open by supervisor, only before PUBLISH)
+///
+/// Once an audit is PUBLISHED it becomes immutable. Only the agent can
+/// move it forward (to REVIEWED) by acknowledging the feedback. The
+/// legacy COMPLETED value is retained for backward compatibility with
+/// existing rows; new audits never enter that state.
 enum AuditStatus {
   DRAFT
   IN_PROGRESS
   SUBMITTED
+  PUBLISHED
+  REVIEWED
   COMPLETED
 }
 
@@ -60,6 +67,7 @@ model User {
   auditsAsSupervisor Audit[] @relation("AuditSupervisor")
   auditsCreated      Audit[] @relation("AuditCreator")
   auditsReviewed     Audit[] @relation("AuditReviewer")
+  auditsPublished    Audit[] @relation("AuditPublisher")
   scorecardsCreated  ScorecardTemplate[] @relation("ScorecardCreator")
 }
 
@@ -242,10 +250,30 @@ model Audit {
   createdById  String   @map("created_by")
   createdBy    User     @relation("AuditCreator", fields: [createdById], references: [id])
 
+  /// Set to the agent's id when the agent acknowledges the audit. The
+  /// matching `reviewedAt` timestamp is also populated. Distinct from
+  /// `submittedAt` (supervisor side) and `publishedAt` (release).
   reviewedById String?  @map("reviewed_by")
   reviewedBy   User?    @relation("AuditReviewer", fields: [reviewedById], references: [id])
 
+  /// True after the agent presses "Mark as reviewed".
+  acknowledged Boolean  @default(false)
+
   submittedAt  DateTime? @map("submitted_at")
+
+  /// Set when supervisor publishes the audit. After this point the
+  /// audit is immutable for everyone except the agent's review path.
+  publishedAt   DateTime? @map("published_at")
+  publishedById String?   @map("published_by")
+  publishedBy   User?     @relation("AuditPublisher", fields: [publishedById], references: [id])
+
+  /// Set when the agent acknowledges (status moves to REVIEWED).
+  reviewedAt   DateTime? @map("reviewed_at")
+
+  /// Legacy: set by an older "complete" path that has been superseded
+  /// by the publish/review workflow. Kept for backward compatibility
+  /// with rows persisted before the lifecycle change. New code never
+  /// writes this column.
   completedAt  DateTime? @map("completed_at")
 
   createdAt    DateTime  @default(now()) @map("created_at")
@@ -259,6 +287,7 @@ model Audit {
   @@index([projectId])
   @@index([status])
   @@index([createdAt])
+  @@index([publishedAt])
   @@map("audits")
 }
 

@@ -6,21 +6,9 @@ import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { listAgents, type AgentUser } from "@/features/agents/api";
 import AddUserDialog from "@/features/users/components/AddUserDialog";
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return iso.slice(0, 10);
-  }
-}
 
 const columns: DataTableColumn<AgentUser>[] = [
   {

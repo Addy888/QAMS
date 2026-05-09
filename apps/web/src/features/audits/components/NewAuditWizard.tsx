@@ -5,7 +5,9 @@ import {
   ArrowRight,
   ClipboardCheck,
   Loader2,
+  Lock,
   Save,
+  Send,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -27,10 +29,12 @@ import {
 import {
   createAudit,
   getAudit,
+  publishAudit,
   submitAudit,
   updateAudit,
 } from "../api";
 import {
+  AUDIT_IMMUTABLE_STATUSES,
   AuditStatus,
   type AuditDetail,
 } from "../types";
@@ -89,6 +93,14 @@ export function NewAuditWizard({
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+
+  // Once an audit is PUBLISHED / REVIEWED nothing in this wizard should
+  // be editable. The supervisor is now in "view what the agent sees" mode.
+  const isReadOnly =
+    audit !== null &&
+    AUDIT_IMMUTABLE_STATUSES.includes(audit.status);
+  const isSubmitted = audit?.status === AuditStatus.SUBMITTED;
 
   // Draft answers (per-question + section remarks)
   const [answers, setAnswers] = useState<AnswerDraftMap>({});
@@ -265,6 +277,36 @@ export function NewAuditWizard({
   };
 
   // ------------------------------------------------------------
+  //  Auto-advance: selecting an agent / group / project should move
+  //  the wizard to the next step automatically. The user only has to
+  //  click Continue on free-text steps (call reference) and
+  //  scoring / review where intentional confirmation matters.
+  // ------------------------------------------------------------
+  const handleSelectAgent = useCallback((id: string) => {
+    setAgentId(id);
+    setStep("group");
+  }, []);
+
+  const handleSelectGroup = useCallback(
+    (name: string, projectsInGroup: Project[]) => {
+      setGroupName(name);
+      // If the previously selected project no longer belongs to the new
+      // group, clear it so we don't carry stale state forward.
+      setProjectId((prev) => {
+        if (prev && !projectsInGroup.some((p) => p.id === prev)) return null;
+        return prev;
+      });
+      setStep("project");
+    },
+    [],
+  );
+
+  const handleSelectProject = useCallback((id: number) => {
+    setProjectId(id);
+    setStep("call");
+  }, []);
+
+  // ------------------------------------------------------------
   //  Autosave
   // ------------------------------------------------------------
 
@@ -384,19 +426,91 @@ export function NewAuditWizard({
   //  Submit
   // ------------------------------------------------------------
 
+  /**
+   * Pre-flight check — verify every required question has a non-empty
+   * answer in the current local UI state. Catches the "remaining
+   * questions" backend rejection before the submit round-trip and gives
+   * the user an actionable count rather than a generic 400.
+   */
+  const findMissingRequired = useCallback((): {
+    sectionTitle: string;
+    questionPrompt: string;
+  }[] => {
+    if (!audit) return [];
+    const missing: { sectionTitle: string; questionPrompt: string }[] = [];
+    for (const section of audit.sections) {
+      for (const q of section.questions) {
+        if (!q.required) continue;
+        const draft = answers[q.id];
+        const v = draft?.value;
+        if (v === null || v === undefined || String(v).trim() === "") {
+          missing.push({
+            sectionTitle: section.title,
+            questionPrompt: q.prompt,
+          });
+        }
+      }
+    }
+    return missing;
+  }, [audit, answers]);
+
   const handleSubmit = useCallback(async () => {
     if (!audit) return;
+
+    // ----- 1. Pre-flight: surface UI/state mismatches before submit ----
+    const missing = findMissingRequired();
+    if (missing.length > 0) {
+      toast.error(
+        `Cannot submit yet — ${missing.length} required question${
+          missing.length === 1 ? "" : "s"
+        } still need an answer.`,
+      );
+      // Drop the user back on the scorecard step so they can fix it.
+      setStep("scorecard");
+      return;
+    }
+
+    // ----- 2. Cancel any pending debounced autosave and flush dirty ----
     if (autosaveTimer.current) {
       window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
     }
     await flushAutosave();
+
+    // ----- 3. Build the *full authoritative* payload from local state --
+    // We never rely on autosave alone — the submit always sends the
+    // complete answer map, every section remark, and the overall
+    // comment as the user currently sees them in the UI. That removes
+    // any drift between in-flight autosaves and what we're submitting.
+    const fullAnswers = Object.entries(answers).map(([questionId, draft]) => ({
+      questionId: Number(questionId),
+      value: draft?.value ?? null,
+      remark: draft?.remark ?? null,
+    }));
+
+    const fullSectionRemarks = Object.entries(sectionRemarks).map(
+      ([sectionId, remark]) => ({
+        sectionId: Number(sectionId),
+        remark: remark ?? null,
+      }),
+    );
+
     setSubmitting(true);
     try {
       const finalAudit = await submitAudit(audit.id, {
         overallComment,
+        answers: fullAnswers,
+        sectionRemarks: fullSectionRemarks,
       });
+      setAudit(finalAudit);
+      // Re-ingest the finalized server detail so the UI mirrors what
+      // the backend saved (including normalized scores, fatal flags).
+      ingestDetail(finalAudit);
+      // Reset the dirty tracker — submit just flushed everything.
+      dirtyRef.current.answerIds.clear();
+      dirtyRef.current.sectionIds.clear();
+      dirtyRef.current.overallChanged = false;
       toast.success(`Audit ${finalAudit.auditCode} submitted`);
-      onSubmitted(finalAudit);
     } catch (e) {
       const err = e as AxiosError<{ message?: string | string[] }>;
       const raw = err.response?.data?.message;
@@ -405,7 +519,38 @@ export function NewAuditWizard({
     } finally {
       setSubmitting(false);
     }
-  }, [audit, flushAutosave, overallComment, onSubmitted]);
+  }, [
+    audit,
+    flushAutosave,
+    overallComment,
+    answers,
+    sectionRemarks,
+    findMissingRequired,
+    ingestDetail,
+  ]);
+
+  /**
+   * Publish a SUBMITTED audit so the agent can see it. Locks the audit
+   * for everyone after this — the supervisor cannot reopen / edit answers
+   * once this completes.
+   */
+  const handlePublish = useCallback(async () => {
+    if (!audit) return;
+    setPublishing(true);
+    try {
+      const published = await publishAudit(audit.id);
+      setAudit(published);
+      toast.success(`Audit ${published.auditCode} published to agent`);
+      onSubmitted(published);
+    } catch (e) {
+      const err = e as AxiosError<{ message?: string | string[] }>;
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw.join(", ") : raw;
+      toast.error(msg ?? "Could not publish audit");
+    } finally {
+      setPublishing(false);
+    }
+  }, [audit, onSubmitted]);
 
   // ------------------------------------------------------------
   //  Render
@@ -477,7 +622,7 @@ export function NewAuditWizard({
                 <button
                   key={a.id}
                   type="button"
-                  onClick={() => setAgentId(a.id)}
+                  onClick={() => handleSelectAgent(a.id)}
                   className={cn(
                     "flex items-center gap-3 rounded-md border bg-bg-elevated p-3 text-left transition-colors",
                     agentId === a.id
@@ -511,15 +656,7 @@ export function NewAuditWizard({
                 <button
                   key={g.groupName}
                   type="button"
-                  onClick={() => {
-                    setGroupName(g.groupName);
-                    if (
-                      projectId &&
-                      !g.projects.some((p) => p.id === projectId)
-                    ) {
-                      setProjectId(null);
-                    }
-                  }}
+                  onClick={() => handleSelectGroup(g.groupName, g.projects)}
                   className={cn(
                     "flex flex-col gap-1 rounded-md border bg-bg-elevated p-3 text-left transition-colors",
                     groupName === g.groupName
@@ -557,7 +694,7 @@ export function NewAuditWizard({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setProjectId(p.id)}
+                    onClick={() => handleSelectProject(p.id)}
                     className={cn(
                       "flex flex-col gap-1 rounded-md border bg-bg-elevated p-3 text-left transition-colors",
                       projectId === p.id
@@ -613,6 +750,7 @@ export function NewAuditWizard({
                 sections={audit.sections}
                 answers={answers}
                 sectionRemarks={sectionRemarks}
+                readOnly={isReadOnly}
                 onAnswer={onAnswer}
                 onAnswerRemark={onAnswerRemark}
                 onSectionRemark={onSectionRemark}
@@ -655,11 +793,19 @@ export function NewAuditWizard({
                 value={overallComment}
                 onChange={(e) => onOverallComment(e.target.value)}
                 placeholder="Summarize the audit outcome and feedback for the agent…"
+                disabled={isReadOnly}
                 className={cn(
                   fieldClass,
                   "h-auto resize-none py-2 leading-relaxed",
+                  isReadOnly && "cursor-not-allowed opacity-70",
                 )}
               />
+              {isReadOnly && (
+                <p className="mt-2 inline-flex items-center gap-1 text-xs text-fg-subtle">
+                  <Lock className="h-3 w-3" />
+                  Audit is locked — the agent has been notified.
+                </p>
+              )}
             </StepShell>
           </div>
 
@@ -698,7 +844,29 @@ export function NewAuditWizard({
               </button>
             ) : null}
 
-            {step === "review" ? (
+            {step === "review" && isReadOnly ? (
+              <span className="inline-flex h-9 items-center gap-1.5 rounded-md border border-success/30 bg-success/10 px-3 text-sm font-medium text-success">
+                <Lock className="h-4 w-4" />
+                Audit locked
+              </span>
+            ) : step === "review" && isSubmitted ? (
+              <button
+                type="button"
+                onClick={() => void handlePublish()}
+                disabled={publishing || busy}
+                className={cn(
+                  "inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg",
+                  "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
+                )}
+              >
+                {publishing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Publish to agent
+              </button>
+            ) : step === "review" ? (
               <button
                 type="button"
                 onClick={() => void handleSubmit()}

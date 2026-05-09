@@ -15,6 +15,7 @@ const auth_module_1 = require("./auth/auth.module");
 const projects_module_1 = require("./projects/projects.module");
 const audits_module_1 = require("./audits/audits.module");
 const scorecards_module_1 = require("./scorecards/scorecards.module");
+const agent_audits_module_1 = require("./agent-audits/agent-audits.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -30,6 +31,7 @@ exports.AppModule = AppModule = __decorate([
             projects_module_1.ProjectsModule,
             scorecards_module_1.ScorecardsModule,
             audits_module_1.AuditsModule,
+            agent_audits_module_1.AgentAuditsModule,
         ],
     })
 ], AppModule);

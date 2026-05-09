@@ -164,4 +164,21 @@ export class AuditsController {
       dto,
     );
   }
+
+  /**
+   * Publish a SUBMITTED audit so the agent can see it. Once published
+   * the audit is immutable for everyone — supervisor cannot re-open or
+   * edit answers, the only forward step is the agent's acknowledgement.
+   */
+  @Patch(":id/publish")
+  @Roles("SUPERVISOR")
+  async publish(
+    @CurrentUser() actor: CurrentUserPayload,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.audits.publish(id, {
+      id: actor.id,
+      role: actor.role as Role,
+    });
+  }
 }
