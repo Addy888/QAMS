@@ -24,7 +24,14 @@ import type {
   AgentAuditListItem,
   AgentSummary,
 } from "@/features/agent-audits/types";
-import { cn, formatDate } from "@/lib/utils";
+import { TimeFilterChips } from "@/features/dashboard/components/TimeFilterChips";
+import {
+  cn,
+  dateRangeFor,
+  formatDate,
+  isWithinRange,
+  type DateRangePreset,
+} from "@/lib/utils";
 
 function scoreToneClass(value: number | null, fatal = false): string {
   if (fatal) return "text-danger";
@@ -39,6 +46,7 @@ export default function AgentDashboard() {
   const [audits, setAudits] = useState<AgentAuditListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [range, setRange] = useState<DateRangePreset>("all");
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -62,20 +70,58 @@ export default function AgentDashboard() {
     void fetchAll();
   }, [fetchAll]);
 
-  const recentAudits = useMemo(() => audits.slice(0, 5), [audits]);
+  // Apply the time filter against `publishedAt` — published is the moment
+  // an audit reaches the agent's view, so it's the most natural anchor.
+  // Audits with no publishedAt (shouldn't happen for AGENT-visible rows)
+  // fall back to `createdAt` so they're not silently dropped.
+  const filtered = useMemo(() => {
+    const r = dateRangeFor(range);
+    return audits.filter((a) =>
+      isWithinRange(a.publishedAt ?? a.createdAt, r),
+    );
+  }, [audits, range]);
+
+  // Range-aware KPIs computed off the filtered list. The summary
+  // endpoint provides the All-time numbers; we replace them whenever the
+  // user picks a narrower range.
+  const filteredStats = useMemo(() => {
+    const total = filtered.length;
+    const fatal = filtered.filter((a) => a.fatalTriggered).length;
+    const reviewed = filtered.filter(
+      (a) => a.status === AuditStatus.REVIEWED,
+    ).length;
+    const pending = filtered.filter(
+      (a) => a.status === AuditStatus.PUBLISHED,
+    ).length;
+    const scored = filtered.filter((a) => a.finalScore !== null);
+    const avg =
+      scored.length > 0
+        ? Math.round(
+            (scored.reduce((acc, a) => acc + (a.finalScore ?? 0), 0) /
+              scored.length) *
+              10,
+          ) / 10
+        : null;
+    const latest = filtered[0] ?? null;
+    return { total, fatal, reviewed, pending, avg, latest };
+  }, [filtered]);
+
+  const recentAudits = useMemo(() => filtered.slice(0, 5), [filtered]);
 
   const pendingReviews = useMemo(
-    () => audits.filter((a) => a.status === AuditStatus.PUBLISHED).slice(0, 5),
-    [audits],
+    () => filtered.filter((a) => a.status === AuditStatus.PUBLISHED).slice(0, 5),
+    [filtered],
   );
 
   const latestFeedback = useMemo(
     () =>
-      audits.find((a) => a.status === AuditStatus.PUBLISHED) ??
-      audits[0] ??
+      filtered.find((a) => a.status === AuditStatus.PUBLISHED) ??
+      filtered[0] ??
       null,
-    [audits],
+    [filtered],
   );
+
+  const isFiltered = range !== "all";
 
   return (
     <PageContainer
@@ -91,50 +137,78 @@ export default function AgentDashboard() {
         </Link>
       }
     >
-      {/* ----- KPI row -------------------------------------------------- */}
+      {/* ----- Time filter --------------------------------------------- */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <TimeFilterChips value={range} onChange={setRange} />
+        <p className="text-xs text-fg-subtle">
+          {loading
+            ? "Loading…"
+            : `${filteredStats.total} audit${filteredStats.total === 1 ? "" : "s"} in range`}
+        </p>
+      </div>
+
+      {/* ----- KPI row — range-aware ----------------------------------- */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Average score"
           value={
-            summary && summary.averageScore !== null
-              ? `${summary.averageScore.toFixed(1)} / 100`
-              : "—"
+            isFiltered
+              ? filteredStats.avg !== null
+                ? `${filteredStats.avg.toFixed(1)} / 100`
+                : "—"
+              : summary && summary.averageScore !== null
+                ? `${summary.averageScore.toFixed(1)} / 100`
+                : "—"
           }
           icon={TrendingUp}
-          description="Mean of every published / reviewed audit"
+          description={
+            isFiltered ? "Within selected range" : "All published / reviewed"
+          }
           loading={loading}
         />
         <StatCard
           label="Latest score"
           value={
-            summary && summary.latestScore !== null
-              ? `${summary.latestScore.toFixed(1)} / 100`
-              : "—"
+            isFiltered
+              ? filteredStats.latest && filteredStats.latest.finalScore !== null
+                ? `${filteredStats.latest.finalScore.toFixed(1)} / 100`
+                : "—"
+              : summary && summary.latestScore !== null
+                ? `${summary.latestScore.toFixed(1)} / 100`
+                : "—"
           }
           icon={Trophy}
           description={
-            summary?.latestAuditAt
-              ? `Published ${formatDate(summary.latestAuditAt)}`
-              : "No audits yet"
+            (isFiltered ? filteredStats.latest?.publishedAt : summary?.latestAuditAt)
+              ? `Published ${formatDate(
+                  isFiltered
+                    ? filteredStats.latest!.publishedAt
+                    : summary!.latestAuditAt!,
+                )}`
+              : "No audits in range"
           }
           loading={loading}
         />
         <StatCard
           label="Total audits"
-          value={summary?.totalAudits ?? 0}
+          value={isFiltered ? filteredStats.total : (summary?.totalAudits ?? 0)}
           icon={ClipboardList}
           description={
-            summary
-              ? `${summary.reviewedCount} reviewed`
-              : "Includes published & reviewed"
+            isFiltered
+              ? `${filteredStats.reviewed} reviewed · ${filteredStats.pending} pending`
+              : summary
+                ? `${summary.reviewedCount} reviewed · ${summary.pendingReviewCount} pending`
+                : "Published & reviewed"
           }
           loading={loading}
         />
         <StatCard
           label="Fatal triggers"
-          value={summary?.fatalCount ?? 0}
+          value={isFiltered ? filteredStats.fatal : (summary?.fatalCount ?? 0)}
           icon={ShieldAlert}
-          description="Audits with at least one fatal parameter"
+          description={
+            isFiltered ? "Within selected range" : "Across all your audits"
+          }
           loading={loading}
         />
       </div>

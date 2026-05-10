@@ -12,11 +12,15 @@ import {
   AUDIT_STATUS_TRANSITIONS,
   AuditStatus,
 } from "../audits/audit-status.enum";
+import type { AcknowledgeAuditDto } from "./dto/acknowledge.dto";
 import type {
   AgentAuditDetail,
   AgentAuditListItem,
   AgentSummary,
 } from "./types";
+
+/** Minimum length of a disagree remark. Keeps drive-by "no" responses out. */
+const DISAGREE_REMARK_MIN = 5;
 
 interface AuthorizedActor {
   id: string;
@@ -76,6 +80,8 @@ export class AgentAuditsService {
       publishedAt: r.publishedAt,
       reviewedAt: r.reviewedAt,
       acknowledged: r.acknowledged,
+      acknowledgmentMode: r.acknowledgmentMode ?? null,
+      acknowledgmentRemark: r.acknowledgmentRemark ?? null,
       completedAt: r.completedAt,
     }));
   }
@@ -115,17 +121,19 @@ export class AgentAuditsService {
   // -------------------------------------------------------------------
 
   /**
-   * Mark an audit as REVIEWED by the agent.
+   * Acknowledge an audit. The agent must pick a stance:
    *
-   *  - status must be PUBLISHED (not already REVIEWED)
-   *  - actor must own the audit
-   *  - acknowledged becomes true, reviewedAt = now, reviewedById = actor.id
-   *  - idempotent intent: a second call returns 400 instead of silently
-   *    overwriting prior data
+   *   - mode = "AGREED"    → accepts the audit; remark optional
+   *   - mode = "DISAGREED" → disputes the audit; remark required
+   *
+   * Either way the audit moves PUBLISHED → REVIEWED and is marked
+   * acknowledged. Acknowledgement does NOT mutate score / answers /
+   * overall comment — the published audit stays immutable.
    */
   async acknowledge(
     id: number,
     actor: AuthorizedActor,
+    dto: AcknowledgeAuditDto,
   ): Promise<AgentAuditDetail> {
     this.requireAgent(actor);
 
@@ -154,6 +162,16 @@ export class AgentAuditsService {
       );
     }
 
+    const trimmedRemark = dto.remark?.trim() ?? "";
+
+    if (dto.mode === "DISAGREED") {
+      if (trimmedRemark.length < DISAGREE_REMARK_MIN) {
+        throw new BadRequestException(
+          `A remark of at least ${DISAGREE_REMARK_MIN} characters is required when disagreeing.`,
+        );
+      }
+    }
+
     await this.prisma.audit.update({
       where: { id },
       data: {
@@ -161,6 +179,8 @@ export class AgentAuditsService {
         acknowledged: true,
         reviewedAt: new Date(),
         reviewedById: actor.id,
+        acknowledgmentMode: dto.mode,
+        acknowledgmentRemark: trimmedRemark.length > 0 ? trimmedRemark : null,
       },
     });
 

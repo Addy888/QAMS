@@ -12,7 +12,7 @@ import { AppCard } from "@/components/ui/AppCard";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
-import { cn, formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime, qualityLabel } from "@/lib/utils";
 import AuditStatusBadge from "@/features/audits/components/AuditStatusBadge";
 import { AuditStatus } from "@/features/audits/types";
 import { getMyAudits } from "@/features/agent-audits/api";
@@ -180,6 +180,32 @@ export default function MyAuditsPage() {
             )}
           </div>
         ),
+      },
+      {
+        key: "quality",
+        header: "Quality",
+        cell: (row) => {
+          const q = qualityLabel(row.finalScore, row.fatalTriggered);
+          if (q === null) {
+            return <span className="text-[11px] text-fg-subtle">—</span>;
+          }
+          const tone =
+            q === "GOOD"
+              ? "border-success/40 bg-success/15 text-success"
+              : q === "AVERAGE"
+                ? "border-warning/40 bg-warning/15 text-warning"
+                : "border-danger/40 bg-danger/15 text-danger";
+          return (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                tone,
+              )}
+            >
+              {q}
+            </span>
+          );
+        },
       },
       {
         key: "status",

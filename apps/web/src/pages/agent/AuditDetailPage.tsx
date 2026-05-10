@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Loader2,
   MessageSquareQuote,
   ShieldAlert,
   ShieldCheck,
+  ThumbsDown,
+  ThumbsUp,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -15,7 +18,8 @@ import PageContainer from "@/layouts/PageContainer";
 import { AppCard } from "@/components/ui/AppCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
-import { cn, formatDateTime } from "@/lib/utils";
+import Modal from "@/components/ui/Modal";
+import { cn, formatDateTime, qualityLabel } from "@/lib/utils";
 import {
   acknowledgeAudit,
   getMyAuditById,
@@ -27,6 +31,8 @@ import type {
 } from "@/features/agent-audits/types";
 import AuditStatusBadge from "@/features/audits/components/AuditStatusBadge";
 import { AuditStatus } from "@/features/audits/types";
+
+const DISAGREE_REMARK_MIN = 5;
 
 function scoreToneClass(value: number | null, fatal: boolean): string {
   if (fatal) return "text-danger";
@@ -83,19 +89,57 @@ export default function AuditDetailPage() {
     void fetch();
   }, [fetch]);
 
-  const handleAcknowledge = async () => {
+  const [agreeBusy, setAgreeBusy] = useState(false);
+  const [disagreeOpen, setDisagreeOpen] = useState(false);
+  const [disagreeRemark, setDisagreeRemark] = useState("");
+  const [disagreeBusy, setDisagreeBusy] = useState(false);
+
+  const handleAgree = async () => {
     if (!audit) return;
+    setAgreeBusy(true);
     setAcknowledging(true);
     try {
-      const updated = await acknowledgeAudit(audit.id);
+      const updated = await acknowledgeAudit(audit.id, { mode: "AGREED" });
       setAudit(updated);
-      toast.success("Audit marked as reviewed");
+      toast.success("Marked as reviewed — you agreed with the audit");
     } catch (e) {
       const err = e as AxiosError<{ message?: string | string[] }>;
       const raw = err.response?.data?.message;
       const msg = Array.isArray(raw) ? raw.join(", ") : raw;
       toast.error(msg ?? "Could not acknowledge audit");
     } finally {
+      setAgreeBusy(false);
+      setAcknowledging(false);
+    }
+  };
+
+  const handleDisagreeSubmit = async () => {
+    if (!audit) return;
+    const trimmed = disagreeRemark.trim();
+    if (trimmed.length < DISAGREE_REMARK_MIN) {
+      toast.error(
+        `Please provide at least ${DISAGREE_REMARK_MIN} characters explaining the reason.`,
+      );
+      return;
+    }
+    setDisagreeBusy(true);
+    setAcknowledging(true);
+    try {
+      const updated = await acknowledgeAudit(audit.id, {
+        mode: "DISAGREED",
+        remark: trimmed,
+      });
+      setAudit(updated);
+      setDisagreeOpen(false);
+      setDisagreeRemark("");
+      toast.success("Disagreement recorded — your supervisor will be notified");
+    } catch (e) {
+      const err = e as AxiosError<{ message?: string | string[] }>;
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw.join(", ") : raw;
+      toast.error(msg ?? "Could not record disagreement");
+    } finally {
+      setDisagreeBusy(false);
       setAcknowledging(false);
     }
   };
@@ -151,22 +195,33 @@ export default function AuditDetailPage() {
           Back
         </button>
         {canAcknowledge && (
-          <button
-            type="button"
-            onClick={() => void handleAcknowledge()}
-            disabled={acknowledging}
-            className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg",
-              "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
-            )}
-          >
-            {acknowledging ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            Mark as reviewed
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDisagreeOpen(true)}
+              disabled={acknowledging}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 px-3 text-sm font-medium text-danger hover:bg-danger/20 disabled:opacity-60"
+            >
+              <ThumbsDown className="h-4 w-4" />
+              Disagree
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleAgree()}
+              disabled={acknowledging}
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-md bg-success px-3 text-sm font-medium text-white",
+                "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
+              )}
+            >
+              {agreeBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ThumbsUp className="h-4 w-4" />
+              )}
+              Agree
+            </button>
+          </div>
         )}
       </div>
 
@@ -179,7 +234,20 @@ export default function AuditDetailPage() {
                 {audit.auditCode}
               </span>
               <AuditStatusBadge status={audit.status} />
-              {audit.acknowledged && (
+              {audit.acknowledged && audit.acknowledgmentMode === "AGREED" && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success">
+                  <ThumbsUp className="h-3 w-3" />
+                  Agreed
+                </span>
+              )}
+              {audit.acknowledged &&
+                audit.acknowledgmentMode === "DISAGREED" && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-danger">
+                    <ThumbsDown className="h-3 w-3" />
+                    Disagreed
+                  </span>
+                )}
+              {audit.acknowledged && audit.acknowledgmentMode === null && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success">
                   <CheckCircle2 className="h-3 w-3" />
                   Acknowledged
@@ -225,6 +293,26 @@ export default function AuditDetailPage() {
                 ? "—"
                 : `${audit.finalScore.toFixed(1)} / 100`}
             </p>
+            {(() => {
+              const q = qualityLabel(audit.finalScore, audit.fatalTriggered);
+              if (q === null) return null;
+              const tone =
+                q === "GOOD"
+                  ? "border-success/40 bg-success/15 text-success"
+                  : q === "AVERAGE"
+                    ? "border-warning/40 bg-warning/15 text-warning"
+                    : "border-danger/40 bg-danger/15 text-danger";
+              return (
+                <span
+                  className={cn(
+                    "inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                    tone,
+                  )}
+                >
+                  Quality · {q}
+                </span>
+              );
+            })()}
             {audit.fatalTriggered && audit.totalScore !== null && (
               <p className="text-xs text-fg-subtle">
                 Raw score (before fatal): {audit.totalScore.toFixed(1)} / 100
@@ -267,6 +355,41 @@ export default function AuditDetailPage() {
         )}
       </AppCard>
 
+      {/* ------- Supervisor correction note (post-publish) -------------- */}
+      {audit.supervisorCorrectionNote && (
+        <AppCard padding="md" className="mb-6 border-warning/30">
+          <div className="mb-2 flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-warning" />
+            <p className="text-sm font-semibold text-fg">
+              Supervisor correction note
+            </p>
+          </div>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg-muted">
+            {audit.supervisorCorrectionNote}
+          </p>
+          <p className="mt-2 text-[11px] text-fg-subtle">
+            Added by your supervisor after publishing — the original audit
+            is unchanged.
+          </p>
+        </AppCard>
+      )}
+
+      {/* ------- Agent's own disagreement remark (if any) --------------- */}
+      {audit.acknowledgmentMode === "DISAGREED" &&
+        audit.acknowledgmentRemark && (
+          <AppCard padding="md" className="mb-6 border-danger/30">
+            <div className="mb-2 flex items-center gap-2">
+              <ThumbsDown className="h-4 w-4 text-danger" />
+              <p className="text-sm font-semibold text-fg">
+                Your disagreement
+              </p>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg-muted">
+              {audit.acknowledgmentRemark}
+            </p>
+          </AppCard>
+        )}
+
       {/* ------- Section breakdown -------------------------------------- */}
       <div className="mb-6 flex flex-col gap-4">
         {audit.sections.map((section) => (
@@ -278,34 +401,119 @@ export default function AuditDetailPage() {
       {canAcknowledge && (
         <AppCard padding="md" className="border-accent/30">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-fg">
                 Acknowledge this audit
               </p>
               <p className="text-xs text-fg-subtle">
-                Confirms you've read the feedback. The audit will move to
-                Reviewed and your supervisor will see your acknowledgement.
+                Choose <span className="text-success">Agree</span> if you accept
+                the feedback, or{" "}
+                <span className="text-danger">Disagree</span> to record a reason
+                why you dispute it. Either way the audit moves to Reviewed and
+                your supervisor is notified.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => void handleAcknowledge()}
-              disabled={acknowledging}
-              className={cn(
-                "inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg",
-                "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
-              )}
-            >
-              {acknowledging ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4" />
-              )}
-              Mark as reviewed
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDisagreeOpen(true)}
+                disabled={acknowledging}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 px-3 text-sm font-medium text-danger hover:bg-danger/20 disabled:opacity-60"
+              >
+                <ThumbsDown className="h-4 w-4" />
+                Disagree
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAgree()}
+                disabled={acknowledging}
+                className={cn(
+                  "inline-flex h-9 items-center gap-1.5 rounded-md bg-success px-3 text-sm font-medium text-white",
+                  "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
+                )}
+              >
+                {agreeBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ThumbsUp className="h-4 w-4" />
+                )}
+                Agree
+              </button>
+            </div>
           </div>
         </AppCard>
       )}
+
+      {/* ------- Disagree remark modal ---------------------------------- */}
+      <Modal
+        open={disagreeOpen}
+        onOpenChange={(open) => {
+          if (!disagreeBusy) {
+            setDisagreeOpen(open);
+            if (!open) setDisagreeRemark("");
+          }
+        }}
+        title="Disagree with this audit"
+        description="Tell your supervisor why you dispute the feedback. The original audit isn't changed — your remark is recorded alongside it."
+        size="md"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setDisagreeOpen(false);
+                setDisagreeRemark("");
+              }}
+              disabled={disagreeBusy}
+              className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDisagreeSubmit()}
+              disabled={
+                disagreeBusy ||
+                disagreeRemark.trim().length < DISAGREE_REMARK_MIN
+              }
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-md bg-danger px-3 text-sm font-medium text-white",
+                "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
+              )}
+            >
+              {disagreeBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ThumbsDown className="h-4 w-4" />
+              )}
+              Submit disagreement
+            </button>
+          </>
+        }
+      >
+        <label className="text-xs font-medium text-fg-muted">
+          Reason for disagreement
+        </label>
+        <textarea
+          rows={5}
+          value={disagreeRemark}
+          onChange={(e) => setDisagreeRemark(e.target.value)}
+          placeholder="Explain why you dispute the audit (minimum 5 characters)…"
+          className={cn(
+            "mt-1.5 w-full rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg",
+            "placeholder:text-fg-subtle leading-relaxed",
+            "focus-visible:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring/40",
+          )}
+        />
+        <p className="mt-1 text-[11px] text-fg-subtle">
+          {disagreeRemark.trim().length}/1000 characters
+          {disagreeRemark.trim().length < DISAGREE_REMARK_MIN && (
+            <span className="ml-2 text-warning">
+              minimum {DISAGREE_REMARK_MIN} characters
+            </span>
+          )}
+        </p>
+      </Modal>
     </PageContainer>
   );
 }

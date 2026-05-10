@@ -9,8 +9,10 @@ import AgentDashboard from "@/pages/agent/AgentDashboard";
 import ProjectsPage from "@/pages/supervisor/ProjectsPage";
 import AgentsPage from "@/pages/supervisor/AgentsPage";
 import AuditsPage from "@/pages/supervisor/AuditsPage";
+import SupervisorReportsPage from "@/pages/supervisor/ReportsPage";
 import ScorecardsPage from "@/pages/admin/ScorecardsPage";
 import AdminUsersPage from "@/pages/admin/UsersPage";
+import AdminReportsPage from "@/pages/admin/ReportsPage";
 import MyAuditsPage from "@/pages/agent/MyAuditsPage";
 import AuditDetailPage from "@/pages/agent/AuditDetailPage";
 import { useAuthStore } from "@/features/auth/store/authStore";
@@ -72,6 +74,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "/admin/reports",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <AdminReportsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: "/supervisor",
         element: (
           <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
@@ -100,6 +110,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
             <AuditsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/supervisor/reports",
+        element: (
+          <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+            <SupervisorReportsPage />
           </ProtectedRoute>
         ),
       },

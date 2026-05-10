@@ -1,11 +1,12 @@
 import {
-  LayoutDashboard,
-  Users,
+  BarChart3,
   ClipboardList,
-  Trophy,
-  History,
   FolderKanban,
+  History,
+  LayoutDashboard,
+  Trophy,
   UserSquare2,
+  Users,
 } from "lucide-react";
 import type { NavGroup, UserRole } from "@/types/navigation";
 
@@ -30,6 +31,12 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
         { label: "Scorecards", path: "/admin/scorecards", icon: ClipboardList },
       ],
     },
+    {
+      heading: "Insights",
+      items: [
+        { label: "Quality overview", path: "/admin/reports", icon: BarChart3 },
+      ],
+    },
   ],
 
   SUPERVISOR: [
@@ -50,6 +57,7 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
       heading: "Operations",
       items: [
         { label: "Audits", path: "/supervisor/audits", icon: ClipboardList },
+        { label: "Reports", path: "/supervisor/reports", icon: BarChart3 },
       ],
     },
   ],

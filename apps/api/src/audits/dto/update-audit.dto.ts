@@ -1,15 +1,20 @@
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
   ValidateNested,
 } from "class-validator";
 import { OVERALL_COMMENT_MAX, REMARK_MAX } from "../audit.constants";
+import {
+  CALL_REFERENCE_ERROR,
+  CALL_REFERENCE_REGEX,
+} from "./create-audit.dto";
 
 /**
  * One answer being saved by the supervisor while filling the audit.
@@ -54,8 +59,11 @@ export class SectionRemarkInputDto {
  */
 export class UpdateAuditDto {
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim() : value,
+  )
   @IsString()
-  @MaxLength(120)
+  @Matches(CALL_REFERENCE_REGEX, { message: CALL_REFERENCE_ERROR })
   callReference?: string;
 
   @IsOptional()

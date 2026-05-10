@@ -8,6 +8,7 @@ import {
   Lock,
   Save,
   Send,
+  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +16,7 @@ import type { AxiosError } from "axios";
 import { cn } from "@/lib/utils";
 import { AppCard } from "@/components/ui/AppCard";
 import { EmptyState } from "@/components/ui/EmptyState";
+import Modal from "@/components/ui/Modal";
 import {
   listAgents,
   type AgentUser,
@@ -28,8 +30,10 @@ import {
 } from "@/features/projects/types";
 import {
   createAudit,
+  discardAudit,
   getAudit,
   publishAudit,
+  setCorrectionNote,
   submitAudit,
   updateAudit,
 } from "../api";
@@ -94,6 +98,14 @@ export function NewAuditWizard({
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+
+  // Supervisor correction note for PUBLISHED / REVIEWED audits. The
+  // wizard normally treats those as read-only — this single field is
+  // the only mutation allowed once the audit is locked.
+  const [correctionNote, setCorrectionNote] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
 
   // Once an audit is PUBLISHED / REVIEWED nothing in this wizard should
   // be editable. The supervisor is now in "view what the agent sees" mode.
@@ -177,6 +189,7 @@ export function NewAuditWizard({
     setProjectId(detail.project.id);
     setCallReference(detail.callReference);
     setOverallComment(detail.overallComment ?? "");
+    setCorrectionNote(detail.supervisorCorrectionNote ?? "");
 
     const nextAnswers: AnswerDraftMap = {};
     const nextRemarks: SectionRemarkMap = {};
@@ -206,7 +219,9 @@ export function NewAuditWizard({
       case "project":
         return Boolean(projectId);
       case "call":
-        return callReference.trim().length >= 2;
+        // Call reference / recording id must be exactly 10 numeric
+        // digits — same regex the backend DTO enforces.
+        return /^\d{10}$/.test(callReference.trim());
       case "scorecard":
         return Boolean(audit && audit.sections.length);
       case "review":
@@ -552,6 +567,75 @@ export function NewAuditWizard({
     }
   }, [audit, onSubmitted]);
 
+  /**
+   * Discard a DRAFT or IN_PROGRESS audit. Soft-deletes server-side
+   * (the row is hidden from active lists). Confirmation comes from the
+   * modal so we never auto-discard on a stray click. Cancels any
+   * pending autosave timer to avoid resurrecting state after delete.
+   */
+  const handleDiscardConfirm = useCallback(async () => {
+    if (!audit) return;
+    setDiscarding(true);
+    try {
+      if (autosaveTimer.current) {
+        window.clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+      await discardAudit(audit.id);
+      toast.success(`Audit ${audit.auditCode} discarded`);
+      setDiscardOpen(false);
+      // Treat the same as a cancel — pop the user back to whatever
+      // list view opened the wizard so the now-deleted row vanishes.
+      onCancel();
+    } catch (e) {
+      const err = e as AxiosError<{ message?: string | string[] }>;
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw.join(", ") : raw;
+      toast.error(msg ?? "Could not discard audit");
+    } finally {
+      setDiscarding(false);
+    }
+  }, [audit, onCancel]);
+
+  /** Whether the discard button should appear in the header. */
+  const canDiscard =
+    audit !== null &&
+    (audit.status === AuditStatus.DRAFT ||
+      audit.status === AuditStatus.IN_PROGRESS);
+
+  /**
+   * Whether the supervisor correction-note editor should appear. Only
+   * surfaces on locked audits (PUBLISHED / REVIEWED) — published audits
+   * are immutable in every other respect, but a separate, append-only
+   * note is the safe way to record post-publish context.
+   */
+  const canEditCorrectionNote =
+    audit !== null &&
+    (audit.status === AuditStatus.PUBLISHED ||
+      audit.status === AuditStatus.REVIEWED);
+
+  const handleSaveCorrectionNote = useCallback(async () => {
+    if (!audit) return;
+    setSavingNote(true);
+    try {
+      const trimmed = correctionNote.trim();
+      const updated = await setCorrectionNote(
+        audit.id,
+        trimmed.length === 0 ? null : trimmed,
+      );
+      setAudit(updated);
+      ingestDetail(updated);
+      toast.success("Correction note saved");
+    } catch (e) {
+      const err = e as AxiosError<{ message?: string | string[] }>;
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw.join(", ") : raw;
+      toast.error(msg ?? "Could not save correction note");
+    } finally {
+      setSavingNote(false);
+    }
+  }, [audit, correctionNote, ingestDetail]);
+
   // ------------------------------------------------------------
   //  Render
   // ------------------------------------------------------------
@@ -590,6 +674,17 @@ export function NewAuditWizard({
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Saving…
               </span>
+            )}
+            {canDiscard && (
+              <button
+                type="button"
+                onClick={() => setDiscardOpen(true)}
+                disabled={discarding}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-danger/40 bg-danger/10 px-3 text-sm font-medium text-danger hover:bg-danger/20 disabled:opacity-60"
+              >
+                <Trash2 className="h-4 w-4" />
+                Discard
+              </button>
             )}
             <button
               type="button"
@@ -724,21 +819,40 @@ export function NewAuditWizard({
             </label>
             <input
               value={callReference}
-              onChange={(e) => setCallReference(e.target.value)}
-              placeholder="e.g. CALL-2026-04-30-72931"
-              className={cn(fieldClass, "mt-1.5")}
+              // Input mask: keep digits only and cap at 10 characters so
+              // the field cannot accept anything that would fail backend
+              // validation. Trimming + stripping non-digits handles the
+              // common paste case (e.g. "CALL-1234567890").
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D+/g, "").slice(0, 10);
+                setCallReference(digits);
+              }}
+              inputMode="numeric"
+              pattern="\d{10}"
+              maxLength={10}
+              placeholder="e.g. 1234567890"
+              className={cn(fieldClass, "mt-1.5 tracking-widest tabular-nums")}
               autoFocus
             />
             <p className="mt-2 text-xs text-fg-subtle">
-              Used to bind this audit to the source call. Must be unique per agent.
+              Must be exactly 10 digits — the recording / call ID. Unique per agent.
             </p>
+            {callReference.length > 0 && callReference.length < 10 && (
+              <p className="mt-1 text-xs text-warning">
+                {10 - callReference.length} more digit
+                {10 - callReference.length === 1 ? "" : "s"} needed.
+              </p>
+            )}
           </div>
         </StepShell>
       )}
 
       {step === "scorecard" && (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="flex flex-col gap-4">
+          {/* Question list — only this column scrolls. The header card,
+              live-score panel and footer stay anchored so the supervisor
+              never loses context while filling a long template. */}
+          <div className="flex min-h-0 flex-col">
             {!audit || !audit.sections.length ? (
               <AppCard padding="sm">
                 <p className="text-sm text-fg-muted">
@@ -746,20 +860,24 @@ export function NewAuditWizard({
                 </p>
               </AppCard>
             ) : (
-              <ScoreCardFiller
-                sections={audit.sections}
-                answers={answers}
-                sectionRemarks={sectionRemarks}
-                readOnly={isReadOnly}
-                onAnswer={onAnswer}
-                onAnswerRemark={onAnswerRemark}
-                onSectionRemark={onSectionRemark}
-              />
+              <div className="max-h-[calc(100vh-260px)] overflow-y-auto pr-1">
+                <ScoreCardFiller
+                  sections={audit.sections}
+                  answers={answers}
+                  sectionRemarks={sectionRemarks}
+                  readOnly={isReadOnly}
+                  onAnswer={onAnswer}
+                  onAnswerRemark={onAnswerRemark}
+                  onSectionRemark={onSectionRemark}
+                />
+              </div>
             )}
           </div>
 
           {audit && audit.sections.length > 0 && (
-            <LiveScorePanel audit={audit} answers={answers} />
+            <div className="lg:sticky lg:top-4 lg:self-start">
+              <LiveScorePanel audit={audit} answers={answers} />
+            </div>
           )}
         </div>
       )}
@@ -807,6 +925,66 @@ export function NewAuditWizard({
                 </p>
               )}
             </StepShell>
+
+            {/* Safe post-publish edit surface: a correction note that the
+                supervisor can append without mutating the locked audit. */}
+            {canEditCorrectionNote && (
+              <StepShell title="Supervisor correction note">
+                <p className="mb-2 text-xs text-fg-subtle">
+                  This audit is locked, so its score, answers, and overall
+                  comment can no longer change. You can leave a separate
+                  correction note here — it's surfaced to the agent
+                  alongside the audit but never changes the original record.
+                </p>
+                <textarea
+                  rows={4}
+                  value={correctionNote}
+                  onChange={(e) => setCorrectionNote(e.target.value)}
+                  placeholder="e.g. Re: agent's dispute — fatal call-out at 02:14 was correct because…"
+                  className={cn(
+                    fieldClass,
+                    "h-auto resize-none py-2 leading-relaxed",
+                  )}
+                />
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] text-fg-subtle">
+                    {correctionNote.trim().length}/2000 characters
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {correctionNote.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setCorrectionNote("")}
+                        disabled={savingNote}
+                        className="inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-medium text-fg-muted hover:bg-bg-muted hover:text-fg disabled:opacity-60"
+                      >
+                        Clear
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveCorrectionNote()}
+                      disabled={
+                        savingNote ||
+                        correctionNote.trim() ===
+                          (audit?.supervisorCorrectionNote ?? "")
+                      }
+                      className={cn(
+                        "inline-flex h-8 items-center gap-1.5 rounded-md bg-accent px-3 text-xs font-medium text-accent-fg",
+                        "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-50",
+                      )}
+                    >
+                      {savingNote ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )}
+                      Save note
+                    </button>
+                  </div>
+                </div>
+              </StepShell>
+            )}
           </div>
 
           <LiveScorePanel audit={audit} answers={answers} />
@@ -904,6 +1082,55 @@ export function NewAuditWizard({
           </div>
         </div>
       </AppCard>
+
+      {/* Discard confirmation */}
+      <Modal
+        open={discardOpen}
+        onOpenChange={(open) => !discarding && setDiscardOpen(open)}
+        title="Discard this audit?"
+        description="This draft will be hidden from your active audits list and cannot be re-opened from the wizard. Published audits are never affected."
+        size="sm"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setDiscardOpen(false)}
+              disabled={discarding}
+              className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDiscardConfirm()}
+              disabled={discarding}
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-md bg-danger px-3 text-sm font-medium text-white",
+                "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
+              )}
+            >
+              {discarding ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Discard audit
+            </button>
+          </>
+        }
+      >
+        <div className="text-sm text-fg-muted">
+          {audit ? (
+            <p>
+              <span className="font-medium text-fg">{audit.auditCode}</span>
+              {" — "}
+              {audit.agent.name} · {audit.projectNameSnapshot}
+            </p>
+          ) : (
+            <p>Discarding the current draft.</p>
+          )}
+        </div>
+      </Modal>
     </motion.div>
   );
 }

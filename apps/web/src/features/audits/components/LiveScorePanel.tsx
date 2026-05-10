@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { ShieldAlert } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ShieldAlert, ShieldCheck } from "lucide-react";
+import { cn, qualityLabel } from "@/lib/utils";
 import { AuditQuestionType, type AuditDetail, type AuditQuestion } from "../types";
 import type { AnswerDraftMap } from "./ScoreCardFiller";
 
@@ -22,9 +22,9 @@ interface SectionPreview {
 }
 
 interface AuditPreview {
-  /** Sum of weights for passing parameters (0..100). */
-  total: number | null;
-  /** Same as total, forced to 0 when any fatal parameter has not passed. */
+  /** Sum of weights for passing parameters (raw — fatal-agnostic). */
+  raw: number | null;
+  /** Final score: raw, but forced to 0 when any fatal parameter has not passed. */
   final: number | null;
   fatal: boolean;
   sections: SectionPreview[];
@@ -38,7 +38,7 @@ interface AuditPreview {
  *
  *  - PASS  → +`weight` points
  *  - FAIL / N/A / unanswered → 0
- *  - any fatal that did not pass → final = 0
+ *  - any fatal that did not pass → final = 0 (raw stays informative)
  */
 function previewScore(audit: AuditDetail, answers: AnswerDraftMap): AuditPreview {
   let total = 0;
@@ -65,7 +65,10 @@ function previewScore(audit: AuditDetail, answers: AnswerDraftMap): AuditPreview
       const passed = isAnswered && isPass(q, value);
       const earned = passed ? q.weight : 0;
 
-      const fatalMiss = q.fatal && !passed;
+      // Fatal flag triggers as soon as a fatal question has an
+      // *answered* non-pass value. Unanswered fatals do not flip the
+      // flag yet — they should fail submission, not preview as fatal.
+      const fatalMiss = q.fatal && isAnswered && !passed;
       if (fatalMiss) {
         fatalTriggered = true;
         sectionFatal = true;
@@ -95,13 +98,13 @@ function previewScore(audit: AuditDetail, answers: AnswerDraftMap): AuditPreview
     };
   });
 
-  const totalRounded =
-    answeredCount === 0 ? null : Math.round(total * 10) / 10;
-  const final =
-    totalRounded === null ? null : fatalTriggered ? 0 : totalRounded;
+  // Raw is whatever has been earned so far — show it from the very first
+  // answered question, even if no fatal questions are answered yet.
+  const raw = answeredCount === 0 ? null : Math.round(total * 10) / 10;
+  const final = raw === null ? null : fatalTriggered ? 0 : raw;
 
   return {
-    total: totalRounded,
+    raw,
     final,
     fatal: fatalTriggered,
     sections,
@@ -118,8 +121,6 @@ function isPass(q: AuditQuestion, raw: string | null): boolean {
       return raw.toLowerCase() === "yes";
 
     case AuditQuestionType.RATING: {
-      // The wizard's question payload uses `options` to expose the
-      // rating scale as a list of {label,score}. PASS is the top score.
       const options = q.options ?? [];
       if (!options.length) return false;
       const max = Math.max(...options.map((o) => o.score));
@@ -144,48 +145,86 @@ function isPass(q: AuditQuestion, raw: string | null): boolean {
   }
 }
 
+const QUALITY_TONE: Record<"GOOD" | "AVERAGE" | "BAD", string> = {
+  GOOD: "border-success/40 bg-success/15 text-success",
+  AVERAGE: "border-warning/40 bg-warning/15 text-warning",
+  BAD: "border-danger/40 bg-danger/15 text-danger",
+};
+
 export function LiveScorePanel({ audit, answers }: LiveScorePanelProps) {
   const preview = useMemo(() => previewScore(audit, answers), [audit, answers]);
 
+  const rawLabel =
+    preview.raw === null ? "—" : `${preview.raw.toFixed(1)} / 100`;
   const finalLabel =
     preview.final === null ? "—" : `${preview.final.toFixed(1)} / 100`;
 
+  // Operational quality label is a UI hint based on the *final* score.
+  // Fatal triggers always read as BAD.
+  const quality = qualityLabel(preview.final, preview.fatal);
+
   return (
-    <aside className="sticky top-4 flex flex-col gap-3 rounded-lg border border-border bg-bg-elevated p-4 shadow-elev-1">
+    <aside className="flex flex-col gap-3 rounded-lg border border-border bg-bg-elevated p-4 shadow-elev-1">
       <div>
         <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
           Live score
         </p>
+
+        {/* Final + fatal status (the "decision number") */}
         <div className="mt-1 flex items-baseline gap-2">
           <p
             className={cn(
-              "text-3xl font-semibold tracking-tight",
+              "text-3xl font-semibold tracking-tight tabular-nums",
               preview.fatal ? "text-danger" : "text-fg",
             )}
           >
             {finalLabel}
           </p>
-          {preview.fatal && (
+          <span className="text-[11px] text-fg-subtle">final</span>
+        </div>
+
+        {/* Raw score is always visible so the supervisor can see how
+            close they are independent of fatal status. */}
+        <div className="mt-1 flex items-baseline gap-2">
+          <p className="text-sm font-medium text-fg-muted tabular-nums">
+            {rawLabel}
+          </p>
+          <span className="text-[11px] text-fg-subtle">raw</span>
+        </div>
+
+        {/* Status row: fatal badge or "all clear" hint, plus quality label */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {preview.fatal ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-danger">
               <ShieldAlert className="h-3 w-3" />
-              Fatal hit
+              Fatal triggered → final 0
+            </span>
+          ) : preview.answeredCount > 0 ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success">
+              <ShieldCheck className="h-3 w-3" />
+              No fatal hits
+            </span>
+          ) : null}
+          {quality !== null && (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                QUALITY_TONE[quality],
+              )}
+            >
+              Quality · {quality}
             </span>
           )}
         </div>
-        <p className="mt-1 text-xs text-fg-muted">
+
+        <p className="mt-2 text-xs text-fg-muted">
           {preview.answeredCount}/{preview.totalQuestions} parameters answered
-          {preview.fatal && preview.total !== null && (
-            <span className="text-fg-subtle">
-              {" "}
-              · raw {preview.total.toFixed(1)} / 100
-            </span>
-          )}
         </p>
       </div>
 
       <div className="h-px bg-border" />
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1.5">
         {preview.sections.map((s) => (
           <div key={s.id} className="flex items-center justify-between gap-2">
             <div className="min-w-0">

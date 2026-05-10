@@ -31,6 +31,7 @@ import type {
   ReopenAuditDto,
   SubmitAuditDto,
 } from "./dto/submit-audit.dto";
+import type { CorrectionNoteDto } from "./dto/correction-note.dto";
 import type {
   AuditDetailResponse,
   AuditListItem,
@@ -117,11 +118,14 @@ export class AuditsService {
 
     // Make sure we don't create a duplicate for the same call reference.
     // Any existing audit for this agent+call (in any non-terminal status,
-    // including PUBLISHED/REVIEWED) blocks a new draft.
+    // including PUBLISHED/REVIEWED) blocks a new draft. Discarded
+    // (soft-deleted) audits free their call reference for re-use so
+    // the supervisor can throw away a mistaken draft and start over.
     const existing = await this.prisma.audit.findFirst({
       where: {
         agentId: dto.agentId,
         callReference: dto.callReference.trim(),
+        deletedAt: null,
       },
     });
     if (existing) {
@@ -436,6 +440,10 @@ export class AuditsService {
         agentId: agentIdFilter,
         projectId: filter.projectId,
         groupNameSnapshot: filter.groupName,
+        // Soft-deleted audits are hidden from every list path. There's
+        // no admin "trash" view today; if one is added later it should
+        // explicitly opt-in by passing `{ deletedAt: { not: null } }`.
+        deletedAt: null,
       },
       orderBy: [{ updatedAt: "desc" }],
       include: {
@@ -467,6 +475,12 @@ export class AuditsService {
       },
     });
     if (!row) throw new NotFoundException("Audit not found");
+    if (row.deletedAt) {
+      // Hide soft-deleted audits as if they didn't exist — keeps the
+      // discard surface a clean "remove from view" without leaking
+      // 410 Gone semantics that callers don't currently handle.
+      throw new NotFoundException("Audit not found");
+    }
 
     // Authorization: supervisor must own it; agent may only view their own
     // and only once it's PUBLISHED or REVIEWED (audit visibility rule).
@@ -534,6 +548,7 @@ export class AuditsService {
       overallComment: row.overallComment,
       scorecardTemplateId: row.scorecardTemplateId,
       sections: sectionResponses,
+      supervisorCorrectionNote: row.supervisorCorrectionNote ?? null,
     };
   }
 
@@ -699,6 +714,9 @@ export class AuditsService {
   private async requireAuditForEdit(id: number, actor: AuthorizedActor) {
     const audit = await this.prisma.audit.findUnique({ where: { id } });
     if (!audit) throw new NotFoundException("Audit not found");
+    if (audit.deletedAt) {
+      throw new NotFoundException("Audit not found");
+    }
 
     if (actor.role !== Role.SUPERVISOR) {
       throw new ForbiddenException("Only supervisors can edit audits");
@@ -720,6 +738,103 @@ export class AuditsService {
     }
 
     return audit;
+  }
+
+  // -------------------------------------------------------------------
+  //  CORRECTION NOTE (safe post-publish supervisor edit)
+  // -------------------------------------------------------------------
+
+  /**
+   * Append (or clear) a supervisor correction note on a PUBLISHED /
+   * REVIEWED audit. This is the SAFE alternative to direct editing —
+   * the score, answers, and overall comment stay locked. The note is a
+   * separate append-only field surfaced alongside the original audit so
+   * the agent / supervisor can record context after the fact (e.g.
+   * "agent's dispute is invalid because X").
+   *
+   * Allowed states:
+   *   - PUBLISHED: supervisor can add / update / clear the note
+   *   - REVIEWED:  same — agent has already acknowledged but the
+   *                supervisor may still add follow-up context
+   *   - DRAFT / IN_PROGRESS / SUBMITTED: rejected; use the regular
+   *                edit path before publishing instead.
+   *   - COMPLETED: legacy, immutable.
+   */
+  async setCorrectionNote(
+    id: number,
+    actor: AuthorizedActor,
+    dto: CorrectionNoteDto,
+  ): Promise<AuditDetailResponse> {
+    const audit = await this.prisma.audit.findUnique({ where: { id } });
+    if (!audit || audit.deletedAt) {
+      throw new NotFoundException("Audit not found");
+    }
+
+    if (actor.role !== Role.SUPERVISOR || audit.supervisorId !== actor.id) {
+      throw new ForbiddenException(
+        "Only the audit's supervisor can edit the correction note",
+      );
+    }
+
+    const status = audit.status as AuditStatus;
+    if (
+      status !== AuditStatus.PUBLISHED &&
+      status !== AuditStatus.REVIEWED
+    ) {
+      throw new BadRequestException(
+        `Correction notes are only allowed on published or reviewed audits (current: ${status}).`,
+      );
+    }
+
+    const next = dto.note === undefined ? null : dto.note;
+    await this.prisma.audit.update({
+      where: { id: audit.id },
+      data: { supervisorCorrectionNote: next },
+    });
+
+    return this.getById(audit.id, actor);
+  }
+
+  // -------------------------------------------------------------------
+  //  DISCARD
+  // -------------------------------------------------------------------
+
+  /**
+   * Soft-delete a DRAFT or IN_PROGRESS audit. Sets `deletedAt` /
+   * `deletedById` so the row stays in MySQL for audit-trail purposes
+   * but every subsequent list / detail query treats it as gone.
+   *
+   * Allowed only for the audit's own supervisor. Already-SUBMITTED
+   * audits must be re-opened first; PUBLISHED / REVIEWED / COMPLETED
+   * audits can never be discarded — the immutability promise extends
+   * to the discard surface as well.
+   */
+  async discard(id: number, actor: AuthorizedActor): Promise<void> {
+    const audit = await this.prisma.audit.findUnique({ where: { id } });
+    if (!audit || audit.deletedAt) {
+      throw new NotFoundException("Audit not found");
+    }
+    if (actor.role !== Role.SUPERVISOR || audit.supervisorId !== actor.id) {
+      throw new ForbiddenException(
+        "Only the audit's supervisor can discard it",
+      );
+    }
+    const status = audit.status as AuditStatus;
+    if (
+      status !== AuditStatus.DRAFT &&
+      status !== AuditStatus.IN_PROGRESS
+    ) {
+      throw new BadRequestException(
+        `Only draft or in-progress audits can be discarded (current: ${status}).`,
+      );
+    }
+    await this.prisma.audit.update({
+      where: { id: audit.id },
+      data: {
+        deletedAt: new Date(),
+        deletedById: actor.id,
+      },
+    });
   }
 
   private async recomputeAndPersistScore(auditId: number) {
@@ -807,6 +922,8 @@ function toListItem(row: {
   finalScore: number | null;
   fatalTriggered: boolean;
   acknowledged: boolean;
+  acknowledgmentMode?: string | null;
+  acknowledgmentRemark?: string | null;
   agent: { id: string; name: string; username: string };
   supervisor: { id: string; name: string; username: string };
   project: { id: number; projectName: string; groupName: string };
@@ -836,6 +953,8 @@ function toListItem(row: {
     publishedAt: row.publishedAt,
     reviewedAt: row.reviewedAt,
     acknowledged: row.acknowledged,
+    acknowledgmentMode: row.acknowledgmentMode ?? null,
+    acknowledgmentRemark: row.acknowledgmentRemark ?? null,
     completedAt: row.completedAt,
   };
 }

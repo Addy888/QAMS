@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -27,6 +28,7 @@ import {
   ReopenAuditDto,
   SubmitAuditDto,
 } from "./dto/submit-audit.dto";
+import { CorrectionNoteDto } from "./dto/correction-note.dto";
 import { ScorecardsService } from "../scorecards/scorecards.service";
 
 function parseStatusFilter(raw: unknown): AuditStatus | undefined {
@@ -180,5 +182,43 @@ export class AuditsController {
       id: actor.id,
       role: actor.role as Role,
     });
+  }
+
+  /**
+   * Discard a DRAFT / IN_PROGRESS audit (soft delete). Hides the row
+   * from active workflow lists. PUBLISHED / REVIEWED audits can NEVER
+   * be discarded; SUBMITTED audits must be re-opened first.
+   */
+  @Delete(":id")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles("SUPERVISOR")
+  async discard(
+    @CurrentUser() actor: CurrentUserPayload,
+    @Param("id", ParseIntPipe) id: number,
+  ): Promise<void> {
+    await this.audits.discard(id, {
+      id: actor.id,
+      role: actor.role as Role,
+    });
+  }
+
+  /**
+   * Add or clear a supervisor correction note on a PUBLISHED / REVIEWED
+   * audit. This is the SAFE post-publish edit surface — the locked
+   * score / answers / overall comment are NEVER mutated. Pass `note: null`
+   * (or omit the body) to clear an existing note.
+   */
+  @Patch(":id/correction-note")
+  @Roles("SUPERVISOR")
+  async setCorrectionNote(
+    @CurrentUser() actor: CurrentUserPayload,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() dto: CorrectionNoteDto,
+  ) {
+    return this.audits.setCorrectionNote(
+      id,
+      { id: actor.id, role: actor.role as Role },
+      dto,
+    );
   }
 }

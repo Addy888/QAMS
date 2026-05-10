@@ -52,3 +52,110 @@ export function formatDate(iso: string | Date | null | undefined): string {
     return typeof iso === "string" ? iso : "—";
   }
 }
+
+// =====================================================================
+//  Date range helpers — used by dashboard KPI time filters
+// =====================================================================
+
+/**
+ * Preset windows recognised by the dashboard filter chips.
+ *  - `all`      → no filter (everything)
+ *  - `today`   → from start-of-today to start-of-tomorrow
+ *  - `week`    → last 7 days inclusive
+ *  - `month`   → last 30 days inclusive
+ *  - `custom`  → caller supplies `from`/`to`
+ */
+export type DateRangePreset = "all" | "today" | "week" | "month" | "custom";
+
+export interface DateRange {
+  /** Inclusive lower bound. Null means "no lower bound". */
+  from: Date | null;
+  /** Exclusive upper bound. Null means "no upper bound". */
+  to: Date | null;
+}
+
+function startOfDay(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function addDays(d: Date, days: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + days);
+  return x;
+}
+
+/**
+ * Resolve a preset to a concrete `[from, to)` window.
+ *
+ * The window uses local-time day boundaries — the dashboard runs in the
+ * supervisor's browser, so "today" means today *for them*.
+ */
+export function dateRangeFor(
+  preset: DateRangePreset,
+  custom?: { from?: Date | null; to?: Date | null },
+): DateRange {
+  const now = new Date();
+  const todayStart = startOfDay(now);
+
+  switch (preset) {
+    case "all":
+      return { from: null, to: null };
+    case "today":
+      return { from: todayStart, to: addDays(todayStart, 1) };
+    case "week":
+      return { from: addDays(todayStart, -6), to: addDays(todayStart, 1) };
+    case "month":
+      return { from: addDays(todayStart, -29), to: addDays(todayStart, 1) };
+    case "custom":
+      return {
+        from: custom?.from ? startOfDay(custom.from) : null,
+        to: custom?.to ? addDays(startOfDay(custom.to), 1) : null,
+      };
+  }
+}
+
+/**
+ * Test whether an ISO/date value falls inside a date range. Items with no
+ * timestamp are excluded from any non-"all" range.
+ */
+export function isWithinRange(
+  iso: string | Date | null | undefined,
+  range: DateRange,
+): boolean {
+  if (range.from === null && range.to === null) return true;
+  if (!iso) return false;
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (Number.isNaN(d.getTime())) return false;
+  if (range.from && d < range.from) return false;
+  if (range.to && d >= range.to) return false;
+  return true;
+}
+
+// =====================================================================
+//  Quality label — operational categorization derived from final score
+// =====================================================================
+
+export type QualityLabel = "GOOD" | "AVERAGE" | "BAD" | null;
+
+/**
+ * Map a final score to a coarse operational label. This is purely a
+ * presentation hint — the score engine and lifecycle ignore it.
+ *
+ *  - finalScore null            → null   (no answers yet)
+ *  - fatalTriggered = true      → "BAD"  (final is forced to 0 anyway)
+ *  - finalScore >= 80           → "GOOD"
+ *  - finalScore >= 50           → "AVERAGE"
+ *  - finalScore <  50           → "BAD"
+ */
+export function qualityLabel(
+  finalScore: number | null | undefined,
+  fatalTriggered = false,
+): QualityLabel {
+  if (finalScore === null || finalScore === undefined) return null;
+  if (fatalTriggered) return "BAD";
+  if (finalScore >= 80) return "GOOD";
+  if (finalScore >= 50) return "AVERAGE";
+  return "BAD";
+}

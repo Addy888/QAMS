@@ -256,8 +256,28 @@ model Audit {
   reviewedById String?  @map("reviewed_by")
   reviewedBy   User?    @relation("AuditReviewer", fields: [reviewedById], references: [id])
 
-  /// True after the agent presses "Mark as reviewed".
+  /// True after the agent presses Agree or Disagree on the published
+  /// audit. Acknowledgement does NOT mutate the score or answers — it
+  /// only records the agent's stance on the supervisor's feedback.
   acknowledged Boolean  @default(false)
+
+  /// Agent's stance on the supervisor's feedback. Null until the
+  /// agent acknowledges. Stored as a free string so we can extend
+  /// the vocabulary without a Prisma enum migration:
+  ///   "AGREED"     — agent accepts the audit
+  ///   "DISAGREED"  — agent disputes the audit (remark required)
+  acknowledgmentMode  String?  @map("ack_mode") @db.VarChar(24)
+
+  /// Mandatory when `acknowledgmentMode = "DISAGREED"`. Captures the
+  /// agent's reason for disputing the supervisor's call. Optional but
+  /// allowed when the agent agrees.
+  acknowledgmentRemark String? @map("ack_remark") @db.VarChar(1000)
+
+  /// Supervisor correction note appended after publish/review. Lets the
+  /// supervisor record context (e.g. "agent's dispute is invalid because
+  /// X") without ever mutating the locked score / answers / overall
+  /// comment. The original published audit stays immutable.
+  supervisorCorrectionNote String? @map("supervisor_correction_note") @db.Text
 
   submittedAt  DateTime? @map("submitted_at")
 
@@ -276,6 +296,13 @@ model Audit {
   /// writes this column.
   completedAt  DateTime? @map("completed_at")
 
+  /// Soft-delete timestamp. Set when a supervisor "discards" a draft /
+  /// in-progress audit so it disappears from active workflow lists.
+  /// Discarded audits are preserved on the row level for audit trails
+  /// but are filtered out of every standard list query.
+  deletedAt    DateTime? @map("deleted_at")
+  deletedById  String?   @map("deleted_by")
+
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt        @map("updated_at")
 
@@ -288,6 +315,7 @@ model Audit {
   @@index([status])
   @@index([createdAt])
   @@index([publishedAt])
+  @@index([deletedAt])
   @@map("audits")
 }
 

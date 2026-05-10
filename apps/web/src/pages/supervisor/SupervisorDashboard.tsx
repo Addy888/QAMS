@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import PageContainer from "@/layouts/PageContainer";
 import { WelcomeHeader } from "@/features/dashboard/components/WelcomeHeader";
+import { TimeFilterChips } from "@/features/dashboard/components/TimeFilterChips";
 import { StatCard } from "@/components/ui/StatCard";
 import { AppCard } from "@/components/ui/AppCard";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -23,7 +24,13 @@ import {
   AuditStatus,
   type AuditListItem,
 } from "@/features/audits/types";
-import { cn, formatDateTime } from "@/lib/utils";
+import {
+  cn,
+  dateRangeFor,
+  formatDateTime,
+  isWithinRange,
+  type DateRangePreset,
+} from "@/lib/utils";
 
 function scoreToneClass(value: number | null, fatal: boolean): string {
   if (fatal) return "text-danger";
@@ -34,16 +41,18 @@ function scoreToneClass(value: number | null, fatal: boolean): string {
 }
 
 /**
- * Supervisor dashboard — pulls real audit data the supervisor owns.
- * No mock charts, no "coming soon" placeholders. Stats are computed
- * from the backend's audit list, recent activity is the audits table
- * sorted by `updatedAt`.
+ * Supervisor dashboard — pulls the supervisor's own audit data and
+ * exposes a Today / Week / Month / All-time filter that drives every
+ * KPI card and list on the page. Filtering is client-side over the
+ * (already supervisor-scoped) audit list to keep the implementation
+ * lightweight.
  */
 export default function SupervisorDashboard() {
   const navigate = useNavigate();
   const [audits, setAudits] = useState<AuditListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [range, setRange] = useState<DateRangePreset>("all");
 
   const fetchAudits = useCallback(async () => {
     setLoading(true);
@@ -63,16 +72,23 @@ export default function SupervisorDashboard() {
     void fetchAudits();
   }, [fetchAudits]);
 
+  // Apply the time filter against `createdAt` — the audit's birth date
+  // is the most natural anchor for "audits created today / this week".
+  const filtered = useMemo(() => {
+    const r = dateRangeFor(range);
+    return audits.filter((a) => isWithinRange(a.createdAt, r));
+  }, [audits, range]);
+
   const stats = useMemo(() => {
-    const inProgress = audits.filter(
+    const inProgress = filtered.filter(
       (a) =>
         a.status === AuditStatus.DRAFT ||
         a.status === AuditStatus.IN_PROGRESS,
     ).length;
-    const awaitingPublish = audits.filter(
+    const awaitingPublish = filtered.filter(
       (a) => a.status === AuditStatus.SUBMITTED,
     ).length;
-    const published = audits.filter(
+    const published = filtered.filter(
       (a) =>
         a.status === AuditStatus.PUBLISHED ||
         a.status === AuditStatus.REVIEWED,
@@ -88,23 +104,23 @@ export default function SupervisorDashboard() {
         : null;
 
     return {
-      total: audits.length,
+      total: filtered.length,
       inProgress,
       awaitingPublish,
       published: published.length,
       averageScore: avg,
     };
-  }, [audits]);
+  }, [filtered]);
 
   const recent = useMemo(
     () =>
-      [...audits]
+      [...filtered]
         .sort(
           (a, b) =>
             new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
         )
         .slice(0, 6),
-    [audits],
+    [filtered],
   );
 
   return (
@@ -135,6 +151,15 @@ export default function SupervisorDashboard() {
           </>
         }
       />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <TimeFilterChips value={range} onChange={setRange} />
+        <p className="text-xs text-fg-subtle">
+          {loading
+            ? "Loading…"
+            : `${stats.total} audit${stats.total === 1 ? "" : "s"} in range`}
+        </p>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
@@ -172,7 +197,7 @@ export default function SupervisorDashboard() {
         />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
         <AppCard
           padding="none"
           className="lg:col-span-2"
@@ -208,15 +233,21 @@ export default function SupervisorDashboard() {
           ) : recent.length === 0 ? (
             <EmptyState
               icon={ClipboardList}
-              title="No audits yet"
-              description="Start your first audit from the Audits page."
+              title={range === "all" ? "No audits yet" : "Nothing in this range"}
+              description={
+                range === "all"
+                  ? "Start your first audit from the Audits page."
+                  : "Try widening the time filter."
+              }
               action={
-                <button
-                  onClick={() => navigate("/supervisor/audits")}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90"
-                >
-                  <ClipboardPlus className="h-4 w-4" /> Start audit
-                </button>
+                range === "all" ? (
+                  <button
+                    onClick={() => navigate("/supervisor/audits")}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90"
+                  >
+                    <ClipboardPlus className="h-4 w-4" /> Start audit
+                  </button>
+                ) : undefined
               }
               className="border-none bg-transparent"
             />
@@ -225,7 +256,7 @@ export default function SupervisorDashboard() {
               {recent.map((row) => (
                 <li
                   key={row.id}
-                  className="flex flex-wrap items-center gap-3 px-5 py-3"
+                  className="flex flex-wrap items-center gap-3 px-5 py-2.5"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -290,14 +321,16 @@ export default function SupervisorDashboard() {
               <PipelineRow
                 label="Published"
                 count={
-                  audits.filter((a) => a.status === AuditStatus.PUBLISHED).length
+                  filtered.filter((a) => a.status === AuditStatus.PUBLISHED)
+                    .length
                 }
                 tone="bg-success/15 text-success"
               />
               <PipelineRow
                 label="Reviewed"
                 count={
-                  audits.filter((a) => a.status === AuditStatus.REVIEWED).length
+                  filtered.filter((a) => a.status === AuditStatus.REVIEWED)
+                    .length
                 }
                 tone="bg-success/15 text-success"
               />
@@ -319,7 +352,7 @@ function PipelineRow({
   tone: string;
 }) {
   return (
-    <li className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg-elevated px-3 py-2">
+    <li className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg-elevated px-3 py-1.5">
       <span className="text-sm text-fg-muted">{label}</span>
       <span
         className={cn(

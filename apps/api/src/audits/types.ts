@@ -23,6 +23,13 @@ export interface AuditListItem {
   publishedAt: Date | null;
   reviewedAt: Date | null;
   acknowledged: boolean;
+  /**
+   * Agent's stance on the published audit. Null until the agent
+   * acknowledges. "AGREED" | "DISAGREED".
+   */
+  acknowledgmentMode: string | null;
+  /** Optional remark left by the agent (mandatory for DISAGREED). */
+  acknowledgmentRemark: string | null;
   /** Legacy column — null on all newly-created audits. */
   completedAt: Date | null;
 }
@@ -71,6 +78,12 @@ export interface AuditDetailResponse extends AuditListItem {
   overallComment: string | null;
   scorecardTemplateId: number | null;
   sections: AuditSectionResponse[];
+  /**
+   * Supervisor correction note added after publish. Null while the
+   * supervisor hasn't appended one. The note never mutates score or
+   * answers — it's a separate, append-only field surfaced alongside.
+   */
+  supervisorCorrectionNote: string | null;
 }
 
 export interface AuditScoreSummary {

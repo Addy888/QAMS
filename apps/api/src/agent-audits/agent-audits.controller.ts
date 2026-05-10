@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -15,6 +16,7 @@ import {
 } from "../auth/current-user.decorator";
 import { Role } from "../auth/role.enum";
 import { AgentAuditsService } from "./agent-audits.service";
+import { AcknowledgeAuditDto } from "./dto/acknowledge.dto";
 
 /**
  * Agent-only audit endpoints.
@@ -58,11 +60,13 @@ export class AgentAuditsController {
   async acknowledge(
     @CurrentUser() actor: CurrentUserPayload,
     @Param("id", ParseIntPipe) id: number,
+    @Body() dto: AcknowledgeAuditDto,
   ) {
-    return this.agentAudits.acknowledge(id, {
-      id: actor.id,
-      role: actor.role as Role,
-    });
+    return this.agentAudits.acknowledge(
+      id,
+      { id: actor.id, role: actor.role as Role },
+      dto,
+    );
   }
 
   @Get("summary")

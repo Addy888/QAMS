@@ -62,6 +62,9 @@ export interface AuditListItem {
   finalScore: number | null;
   fatalTriggered: boolean;
   acknowledged: boolean;
+  /** "AGREED" | "DISAGREED" | null — null until agent acknowledges. */
+  acknowledgmentMode: string | null;
+  acknowledgmentRemark: string | null;
   agent: AuditUserRef;
   supervisor: AuditUserRef;
   project: AuditProjectRef;
@@ -117,6 +120,8 @@ export interface AuditDetail extends AuditListItem {
   overallComment: string | null;
   scorecardTemplateId: number | null;
   sections: AuditSection[];
+  /** Supervisor correction note added after publish. Append-only. */
+  supervisorCorrectionNote: string | null;
 }
 
 export interface ScorecardSection {

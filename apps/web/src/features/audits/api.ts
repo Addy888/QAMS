@@ -109,3 +109,28 @@ export async function publishAudit(id: number): Promise<AuditDetail> {
   const res = await api.patch<AuditDetail>(`/audits/${id}/publish`);
   return res.data;
 }
+
+/**
+ * Discard (soft-delete) a DRAFT / IN_PROGRESS audit. Hides it from
+ * every active list. Returns 204; the caller should refresh.
+ */
+export async function discardAudit(id: number): Promise<void> {
+  await api.delete(`/audits/${id}`);
+}
+
+/**
+ * Add (or clear) the supervisor correction note on a PUBLISHED /
+ * REVIEWED audit. Pass `null` to clear. The locked score / answers /
+ * overall comment are never touched — this is the safe post-publish
+ * edit surface.
+ */
+export async function setCorrectionNote(
+  id: number,
+  note: string | null,
+): Promise<AuditDetail> {
+  const res = await api.patch<AuditDetail>(
+    `/audits/${id}/correction-note`,
+    { note },
+  );
+  return res.data;
+}

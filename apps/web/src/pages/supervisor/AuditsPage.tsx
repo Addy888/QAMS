@@ -7,6 +7,7 @@ import {
   Loader2,
   RefreshCw,
   Send,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AxiosError } from "axios";
@@ -15,8 +16,13 @@ import { AppCard } from "@/components/ui/AppCard";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
-import { cn, formatDateTime } from "@/lib/utils";
-import { listAudits, publishAudit } from "@/features/audits/api";
+import Modal from "@/components/ui/Modal";
+import { cn, formatDateTime, qualityLabel } from "@/lib/utils";
+import {
+  discardAudit,
+  listAudits,
+  publishAudit,
+} from "@/features/audits/api";
 import {
   AUDIT_IMMUTABLE_STATUSES,
   AuditStatus,
@@ -98,10 +104,30 @@ export default function AuditsPage() {
   }, [audits, search]);
 
   const [publishingId, setPublishingId] = useState<number | null>(null);
+  const [discardTarget, setDiscardTarget] = useState<AuditListItem | null>(null);
+  const [discarding, setDiscarding] = useState(false);
 
   const handleStartNew = () => {
     setResumingId(undefined);
     setWizardOpen(true);
+  };
+
+  const handleDiscardConfirm = async () => {
+    if (!discardTarget) return;
+    setDiscarding(true);
+    try {
+      await discardAudit(discardTarget.id);
+      toast.success(`Audit ${discardTarget.auditCode} discarded`);
+      setDiscardTarget(null);
+      void fetchAudits();
+    } catch (e) {
+      const err = e as AxiosError<{ message?: string | string[] }>;
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw.join(", ") : raw;
+      toast.error(msg ?? "Could not discard audit");
+    } finally {
+      setDiscarding(false);
+    }
   };
 
   const handleResume = (id: number) => {
@@ -205,6 +231,32 @@ export default function AuditsPage() {
         ),
       },
       {
+        key: "quality",
+        header: "Quality",
+        cell: (row) => {
+          const q = qualityLabel(row.finalScore, row.fatalTriggered);
+          if (q === null) {
+            return <span className="text-[11px] text-fg-subtle">—</span>;
+          }
+          const tone =
+            q === "GOOD"
+              ? "border-success/40 bg-success/15 text-success"
+              : q === "AVERAGE"
+                ? "border-warning/40 bg-warning/15 text-warning"
+                : "border-danger/40 bg-danger/15 text-danger";
+          return (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                tone,
+              )}
+            >
+              {q}
+            </span>
+          );
+        },
+      },
+      {
         key: "status",
         header: "Status",
         cell: (row) => <AuditStatusBadge status={row.status} />,
@@ -226,6 +278,9 @@ export default function AuditsPage() {
         cell: (row) => {
           const locked = AUDIT_IMMUTABLE_STATUSES.includes(row.status);
           const canPublish = row.status === AuditStatus.SUBMITTED;
+          const canDiscard =
+            row.status === AuditStatus.DRAFT ||
+            row.status === AuditStatus.IN_PROGRESS;
           return (
             <div
               className="flex items-center justify-end gap-1"
@@ -266,6 +321,16 @@ export default function AuditsPage() {
                 >
                   <FileEdit className="h-3.5 w-3.5" />
                   Open
+                </button>
+              )}
+              {canDiscard && (
+                <button
+                  type="button"
+                  onClick={() => setDiscardTarget(row)}
+                  title="Discard draft"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
@@ -323,11 +388,9 @@ export default function AuditsPage() {
           </p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {drafts.slice(0, 6).map((d) => (
-              <button
+              <div
                 key={d.id}
-                type="button"
-                onClick={() => handleResume(d.id)}
-                className="group flex flex-col gap-1 rounded-md border border-border bg-bg-elevated p-3 text-left transition-colors hover:bg-bg-muted"
+                className="flex flex-col gap-1 rounded-md border border-border bg-bg-elevated p-3 transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-fg">
@@ -339,11 +402,25 @@ export default function AuditsPage() {
                 <p className="truncate text-xs text-fg-subtle">
                   {d.projectNameSnapshot} · {d.callReference}
                 </p>
-                <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-accent">
-                  <FileEdit className="h-3 w-3" />
-                  Continue
-                </span>
-              </button>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleResume(d.id)}
+                    className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md bg-accent px-2 text-[11px] font-medium text-accent-fg hover:opacity-90"
+                  >
+                    <FileEdit className="h-3 w-3" />
+                    Continue
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscardTarget(d)}
+                    title="Discard draft"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </AppCard>
@@ -427,6 +504,54 @@ export default function AuditsPage() {
           }
         />
       )}
+
+      <Modal
+        open={discardTarget !== null}
+        onOpenChange={(open) => !discarding && !open && setDiscardTarget(null)}
+        title="Discard this draft?"
+        description="The audit will be hidden from your active list. Published audits are never affected by this action."
+        size="sm"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setDiscardTarget(null)}
+              disabled={discarding}
+              className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDiscardConfirm()}
+              disabled={discarding}
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-md bg-danger px-3 text-sm font-medium text-white",
+                "shadow-elev-1 transition-opacity hover:opacity-90 disabled:opacity-60",
+              )}
+            >
+              {discarding ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Discard
+            </button>
+          </>
+        }
+      >
+        {discardTarget ? (
+          <div className="text-sm text-fg-muted">
+            <p>
+              <span className="font-medium text-fg">
+                {discardTarget.auditCode}
+              </span>
+              {" — "}
+              {discardTarget.agent.name} · {discardTarget.projectNameSnapshot}
+            </p>
+          </div>
+        ) : null}
+      </Modal>
     </PageContainer>
   );
 }

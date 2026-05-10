@@ -1,11 +1,16 @@
+import { Transform } from "class-transformer";
 import {
   IsInt,
   IsNotEmpty,
   IsString,
-  MaxLength,
-  MinLength,
+  Matches,
   Min,
 } from "class-validator";
+
+/** Exactly 10 numeric digits, nothing else. */
+export const CALL_REFERENCE_REGEX = /^\d{10}$/;
+export const CALL_REFERENCE_ERROR =
+  "Call reference must be exactly 10 digits (numeric only).";
 
 /**
  * Body for `POST /audits`.
@@ -26,9 +31,11 @@ export class CreateAuditDto {
   @Min(1)
   projectId!: number;
 
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim() : value,
+  )
   @IsString()
   @IsNotEmpty({ message: "Call reference is required" })
-  @MinLength(2, { message: "Call reference must be at least 2 characters" })
-  @MaxLength(120, { message: "Call reference is too long (max 120)" })
+  @Matches(CALL_REFERENCE_REGEX, { message: CALL_REFERENCE_ERROR })
   callReference!: string;
 }
