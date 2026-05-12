@@ -2,6 +2,7 @@ import { Transform, Type } from "class-transformer";
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -10,7 +11,12 @@ import {
   Min,
   ValidateNested,
 } from "class-validator";
-import { OVERALL_COMMENT_MAX, REMARK_MAX } from "../audit.constants";
+import {
+  ACPT_CATEGORIES,
+  ACPT_LEVEL_MAX,
+  OVERALL_COMMENT_MAX,
+  REMARK_MAX,
+} from "../audit.constants";
 import {
   CALL_REFERENCE_ERROR,
   CALL_REFERENCE_REGEX,
@@ -18,7 +24,7 @@ import {
 
 /**
  * One answer being saved by the supervisor while filling the audit.
- * The score engine on the server will recompute everything — clients
+ * The score engine on the server will recompute everything -- clients
  * never set `normalizedScore` directly.
  */
 export class AnswerInputDto {
@@ -89,10 +95,34 @@ export class UpdateAuditDto {
   sectionRemarks?: SectionRemarkInputDto[];
 
   /**
-   * Marks the audit as "started" — moves status from DRAFT to IN_PROGRESS.
+   * Marks the audit as "started" -- moves status from DRAFT to IN_PROGRESS.
    * The wizard sends this as soon as the user reaches the scorecard step.
    */
   @IsOptional()
   @IsBoolean()
   start?: boolean;
+
+  // -----------------------------------------------------------------------
+  //  ACPT -- qualitative, non-scoring call notes
+  //  All three fields are optional and independent; the frontend may send
+  //  any combination. ACPT fields never feed into the scoring engine.
+  // -----------------------------------------------------------------------
+
+  /** One of: Agent | Customer | Process | Technology. Null to clear. */
+  @IsOptional()
+  @IsString()
+  @IsIn([...ACPT_CATEGORIES, null], { message: "Invalid ACPT category" })
+  acptCategory?: string | null;
+
+  /** Free-text Level 2 observations. Null to clear. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(ACPT_LEVEL_MAX)
+  acptLevel2?: string | null;
+
+  /** Free-text Level 3 observations. Null to clear. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(ACPT_LEVEL_MAX)
+  acptLevel3?: string | null;
 }

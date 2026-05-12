@@ -17,6 +17,12 @@ export interface UpdateAuditPayload {
     remark?: string | null;
   }>;
   sectionRemarks?: Array<{ sectionId: number; remark?: string | null }>;
+  /** ACPT category — one of: "Agent" | "Customer" | "Process" | "Technology". Null to clear. */
+  acptCategory?: string | null;
+  /** Free-text Level 2 observations. Null to clear. */
+  acptLevel2?: string | null;
+  /** Free-text Level 3 observations. Null to clear. */
+  acptLevel3?: string | null;
 }
 
 export interface SubmitAuditPayload {
@@ -27,6 +33,12 @@ export interface SubmitAuditPayload {
     remark?: string | null;
   }>;
   sectionRemarks?: Array<{ sectionId: number; remark?: string | null }>;
+  /** ACPT category — one of: "Agent" | "Customer" | "Process" | "Technology". Null to clear. */
+  acptCategory?: string | null;
+  /** Free-text Level 2 observations. Null to clear. */
+  acptLevel2?: string | null;
+  /** Free-text Level 3 observations. Null to clear. */
+  acptLevel3?: string | null;
 }
 
 export interface ListAuditParams {

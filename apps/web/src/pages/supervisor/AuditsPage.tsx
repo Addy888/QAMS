@@ -17,7 +17,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
 import Modal from "@/components/ui/Modal";
-import { cn, formatDateTime, qualityLabel } from "@/lib/utils";
+import { cn, formatDateTime, formatAuditScore, qualityLabel } from "@/lib/utils";
 import {
   discardAudit,
   listAudits,
@@ -43,10 +43,7 @@ const STATUS_FILTERS: { label: string; value: StatusFilter }[] = [
   { label: "Reviewed", value: AuditStatus.REVIEWED },
 ];
 
-function formatScore(value: number | null): string {
-  if (value === null) return "—";
-  return `${value.toFixed(1)}%`;
-}
+// formatScore is replaced by the shared formatAuditScore utility from utils.ts
 
 export default function AuditsPage() {
   const [audits, setAudits] = useState<AuditListItem[]>([]);
@@ -212,23 +209,29 @@ export default function AuditsPage() {
         header: "Score",
         align: "right",
         numeric: true,
-        cell: (row) => (
-          <div className="flex flex-col items-end">
-            <span
-              className={cn(
-                "text-sm font-semibold tabular-nums",
-                row.fatalTriggered ? "text-danger" : "text-fg",
-              )}
-            >
-              {formatScore(row.finalScore)}
-            </span>
-            {row.totalScore !== null && row.fatalTriggered && (
-              <span className="text-[10px] text-fg-subtle">
-                raw {row.totalScore.toFixed(1)}%
+        cell: (row) => {
+          const rawPct =
+            row.totalScore !== null && row.applicablePoints !== null && row.applicablePoints > 0
+              ? (row.totalScore / row.applicablePoints) * 100
+              : row.totalScore; // legacy fallback
+          return (
+            <div className="flex flex-col items-end">
+              <span
+                className={cn(
+                  "text-sm font-semibold tabular-nums",
+                  row.fatalTriggered ? "text-danger" : "text-fg",
+                )}
+              >
+                {formatAuditScore(row.finalScore, row.totalScore, row.applicablePoints)}
               </span>
-            )}
-          </div>
-        ),
+              {row.fatalTriggered && rawPct !== null && (
+                <span className="text-[10px] text-fg-subtle">
+                  raw {typeof rawPct === "number" ? `${rawPct.toFixed(1)}%` : "—"}
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         key: "quality",

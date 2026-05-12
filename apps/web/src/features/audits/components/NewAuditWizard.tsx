@@ -119,12 +119,18 @@ export function NewAuditWizard({
   const [sectionRemarks, setSectionRemarks] = useState<SectionRemarkMap>({});
   const [overallComment, setOverallComment] = useState("");
 
+  // ACPT — qualitative, non-scoring call observations.
+  const [acptCategory, setAcptCategory] = useState<string | null>(null);
+  const [acptLevel2, setAcptLevel2] = useState("");
+  const [acptLevel3, setAcptLevel3] = useState("");
+
   const autosaveTimer = useRef<number | null>(null);
   const dirtyRef = useRef<{
     answerIds: Set<number>;
     sectionIds: Set<number>;
     overallChanged: boolean;
-  }>({ answerIds: new Set(), sectionIds: new Set(), overallChanged: false });
+    acptChanged: boolean;
+  }>({ answerIds: new Set(), sectionIds: new Set(), overallChanged: false, acptChanged: false });
 
   // ------------------------------------------------------------
   //  Initial data loads
@@ -190,6 +196,10 @@ export function NewAuditWizard({
     setCallReference(detail.callReference);
     setOverallComment(detail.overallComment ?? "");
     setCorrectionNote(detail.supervisorCorrectionNote ?? "");
+    // ACPT fields — null on legacy audits, hydrate gracefully.
+    setAcptCategory(detail.acptCategory ?? null);
+    setAcptLevel2(detail.acptLevel2 ?? "");
+    setAcptLevel3(detail.acptLevel3 ?? "");
 
     const nextAnswers: AnswerDraftMap = {};
     const nextRemarks: SectionRemarkMap = {};
@@ -214,16 +224,19 @@ export function NewAuditWizard({
     switch (s) {
       case "agent":
         return Boolean(agentId);
-      case "group":
-        return Boolean(groupName);
-      case "project":
-        return Boolean(projectId);
+      case "group-project":
+        // Both a group and a project must be selected in the merged step.
+        return Boolean(groupName && projectId);
       case "call":
         // Call reference / recording id must be exactly 10 numeric
         // digits — same regex the backend DTO enforces.
         return /^\d{10}$/.test(callReference.trim());
       case "scorecard":
         return Boolean(audit && audit.sections.length);
+      case "acpt":
+        // ACPT is fully optional — any combination of fields (including
+        // all blank) is valid. The supervisor can always advance.
+        return true;
       case "review":
         return true;
     }
@@ -231,13 +244,13 @@ export function NewAuditWizard({
 
   const reachable: WizardStepId[] = useMemo(() => {
     const out: WizardStepId[] = ["agent"];
-    if (agentId) out.push("group");
-    if (groupName) out.push("project");
+    if (agentId) out.push("group-project");
     if (projectId) out.push("call");
     if (audit) out.push("scorecard");
+    if (audit && audit.sections.length) out.push("acpt");
     if (audit && audit.sections.length) out.push("review");
     return out;
-  }, [agentId, groupName, projectId, audit]);
+  }, [agentId, projectId, audit]);
 
   const goNext = useCallback(async () => {
     if (!canAdvanceFrom(step)) return;
@@ -299,7 +312,7 @@ export function NewAuditWizard({
   // ------------------------------------------------------------
   const handleSelectAgent = useCallback((id: string) => {
     setAgentId(id);
-    setStep("group");
+    setStep("group-project");
   }, []);
 
   const handleSelectGroup = useCallback(
@@ -311,7 +324,7 @@ export function NewAuditWizard({
         if (prev && !projectsInGroup.some((p) => p.id === prev)) return null;
         return prev;
       });
-      setStep("project");
+      // Stay on the merged step — project list renders below once a group is picked.
     },
     [],
   );
@@ -331,7 +344,8 @@ export function NewAuditWizard({
     if (
       dirty.answerIds.size === 0 &&
       dirty.sectionIds.size === 0 &&
-      !dirty.overallChanged
+      !dirty.overallChanged &&
+      !dirty.acptChanged
     ) {
       return;
     }
@@ -355,6 +369,15 @@ export function NewAuditWizard({
           }
         : {}),
       ...(dirty.overallChanged ? { overallComment } : {}),
+      // ACPT fields are sent as a group — if any changed we persist all three
+      // so the server always sees a consistent snapshot.
+      ...(dirty.acptChanged
+        ? {
+            acptCategory,
+            acptLevel2: acptLevel2.trim() || null,
+            acptLevel3: acptLevel3.trim() || null,
+          }
+        : {}),
     };
 
     setSaving(true);
@@ -366,13 +389,14 @@ export function NewAuditWizard({
       dirty.answerIds.clear();
       dirty.sectionIds.clear();
       dirty.overallChanged = false;
+      dirty.acptChanged = false;
     } catch (e) {
       console.error(e);
       toast.error("Autosave failed");
     } finally {
       setSaving(false);
     }
-  }, [audit, answers, sectionRemarks, overallComment]);
+  }, [audit, answers, sectionRemarks, overallComment, acptCategory, acptLevel2, acptLevel3]);
 
   const scheduleAutosave = useCallback(() => {
     if (!audit) return;
@@ -432,6 +456,35 @@ export function NewAuditWizard({
     (next: string) => {
       setOverallComment(next);
       dirtyRef.current.overallChanged = true;
+      scheduleAutosave();
+    },
+    [scheduleAutosave],
+  );
+
+  // ACPT field change handlers — all three mark the same acptChanged flag
+  // so the flush sends them together as a consistent group.
+  const onAcptCategory = useCallback(
+    (val: string | null) => {
+      setAcptCategory(val);
+      dirtyRef.current.acptChanged = true;
+      scheduleAutosave();
+    },
+    [scheduleAutosave],
+  );
+
+  const onAcptLevel2 = useCallback(
+    (val: string) => {
+      setAcptLevel2(val);
+      dirtyRef.current.acptChanged = true;
+      scheduleAutosave();
+    },
+    [scheduleAutosave],
+  );
+
+  const onAcptLevel3 = useCallback(
+    (val: string) => {
+      setAcptLevel3(val);
+      dirtyRef.current.acptChanged = true;
       scheduleAutosave();
     },
     [scheduleAutosave],
@@ -516,6 +569,11 @@ export function NewAuditWizard({
         overallComment,
         answers: fullAnswers,
         sectionRemarks: fullSectionRemarks,
+        // Include the latest ACPT state so a submit without a prior autosave
+        // still persists them. Server treats undefined as "leave unchanged".
+        acptCategory,
+        acptLevel2: acptLevel2.trim() || null,
+        acptLevel3: acptLevel3.trim() || null,
       });
       setAudit(finalAudit);
       // Re-ingest the finalized server detail so the UI mirrors what
@@ -525,6 +583,7 @@ export function NewAuditWizard({
       dirtyRef.current.answerIds.clear();
       dirtyRef.current.sectionIds.clear();
       dirtyRef.current.overallChanged = false;
+      dirtyRef.current.acptChanged = false;
       toast.success(`Audit ${finalAudit.auditCode} submitted`);
     } catch (e) {
       const err = e as AxiosError<{ message?: string | string[] }>;
@@ -739,76 +798,80 @@ export function NewAuditWizard({
         </StepShell>
       )}
 
-      {step === "group" && (
-        <StepShell title="Select group">
-          {groupsLoading ? (
-            <p className="text-sm text-fg-subtle">Loading groups…</p>
-          ) : groups.length === 0 ? (
-            <EmptyState title="No groups available" />
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {groups.map((g) => (
-                <button
-                  key={g.groupName}
-                  type="button"
-                  onClick={() => handleSelectGroup(g.groupName, g.projects)}
-                  className={cn(
-                    "flex flex-col gap-1 rounded-md border bg-bg-elevated p-3 text-left transition-colors",
-                    groupName === g.groupName
-                      ? "border-accent/40 ring-1 ring-accent/30"
-                      : "border-border hover:bg-bg-muted",
-                  )}
-                >
-                  <p className="text-sm font-semibold text-fg">{g.groupName}</p>
-                  <p className="text-xs text-fg-subtle">
-                    {g.count} project{g.count === 1 ? "" : "s"}
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-        </StepShell>
-      )}
-
-      {step === "project" && (
-        <StepShell title={`Projects in ${groupName ?? ""}`}>
-          {(() => {
-            const group = groups.find((g) => g.groupName === groupName);
-            const list = group?.projects.filter((p) => p.status === "ACTIVE") ?? [];
-            if (list.length === 0) {
-              return (
-                <EmptyState
-                  title="No active projects"
-                  description="Pick a different group or activate a project."
-                />
-              );
-            }
-            return (
+      {step === "group-project" && (
+        <div className="flex flex-col gap-4">
+          {/* Group picker */}
+          <StepShell title="Select group">
+            {groupsLoading ? (
+              <p className="text-sm text-fg-subtle">Loading groups…</p>
+            ) : groups.length === 0 ? (
+              <EmptyState title="No groups available" />
+            ) : (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {list.map((p) => (
+                {groups.map((g) => (
                   <button
-                    key={p.id}
+                    key={g.groupName}
                     type="button"
-                    onClick={() => handleSelectProject(p.id)}
+                    onClick={() => handleSelectGroup(g.groupName, g.projects)}
                     className={cn(
                       "flex flex-col gap-1 rounded-md border bg-bg-elevated p-3 text-left transition-colors",
-                      projectId === p.id
+                      groupName === g.groupName
                         ? "border-accent/40 ring-1 ring-accent/30"
                         : "border-border hover:bg-bg-muted",
                     )}
                   >
-                    <p className="text-sm font-semibold text-fg">{p.projectName}</p>
-                    {p.description && (
-                      <p className="line-clamp-2 text-xs text-fg-subtle">
-                        {p.description}
-                      </p>
-                    )}
+                    <p className="text-sm font-semibold text-fg">{g.groupName}</p>
+                    <p className="text-xs text-fg-subtle">
+                      {g.count} project{g.count === 1 ? "" : "s"}
+                    </p>
                   </button>
                 ))}
               </div>
-            );
-          })()}
-        </StepShell>
+            )}
+          </StepShell>
+
+          {/* Project picker — appears inline once a group is selected */}
+          {groupName && (
+            <StepShell title={`Projects in ${groupName}`}>
+              {(() => {
+                const group = groups.find((g) => g.groupName === groupName);
+                const list = group?.projects.filter((p) => p.status === "ACTIVE") ?? [];
+                if (list.length === 0) {
+                  return (
+                    <EmptyState
+                      title="No active projects"
+                      description="Pick a different group or activate a project."
+                    />
+                  );
+                }
+                return (
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {list.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleSelectProject(p.id)}
+                        className={cn(
+                          "flex flex-col gap-1 rounded-md border bg-bg-elevated p-3 text-left transition-colors",
+                          projectId === p.id
+                            ? "border-accent/40 ring-1 ring-accent/30"
+                            : "border-border hover:bg-bg-muted",
+                        )}
+                      >
+                        <p className="text-sm font-semibold text-fg">{p.projectName}</p>
+                        {p.description && (
+                          <p className="line-clamp-2 text-xs text-fg-subtle">
+                            {p.description}
+                          </p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+            </StepShell>
+          )}
+        </div>
       )}
 
       {step === "call" && (
@@ -882,6 +945,86 @@ export function NewAuditWizard({
         </div>
       )}
 
+      {step === "acpt" && audit && (
+        <StepShell title="ACPT — Qualitative call observations">
+          <p className="mb-4 text-xs text-fg-subtle">
+            ACPT captures qualitative observations about this call. These fields
+            are strictly informational and never affect the QA score.
+          </p>
+
+          {/* Category selector */}
+          <div className="mb-4 max-w-sm">
+            <label className="text-xs font-medium text-fg-muted">
+              Category
+            </label>
+            <select
+              value={acptCategory ?? ""}
+              onChange={(e) =>
+                onAcptCategory(e.target.value === "" ? null : e.target.value)
+              }
+              disabled={isReadOnly}
+              className={cn(
+                fieldClass,
+                "mt-1.5",
+                isReadOnly && "cursor-not-allowed opacity-70",
+              )}
+            >
+              <option value="">— Select a category —</option>
+              {["Agent", "Customer", "Process", "Technology"].map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Level 2 */}
+          <div className="mb-4">
+            <label className="text-xs font-medium text-fg-muted">
+              Level 2 — observations
+            </label>
+            <textarea
+              rows={4}
+              value={acptLevel2}
+              onChange={(e) => onAcptLevel2(e.target.value)}
+              placeholder="Describe what you observed at level 2…"
+              disabled={isReadOnly}
+              className={cn(
+                fieldClass,
+                "mt-1.5 h-auto resize-none py-2 leading-relaxed",
+                isReadOnly && "cursor-not-allowed opacity-70",
+              )}
+            />
+          </div>
+
+          {/* Level 3 */}
+          <div>
+            <label className="text-xs font-medium text-fg-muted">
+              Level 3 — root cause / detail
+            </label>
+            <textarea
+              rows={4}
+              value={acptLevel3}
+              onChange={(e) => onAcptLevel3(e.target.value)}
+              placeholder="Provide root-cause detail or further context…"
+              disabled={isReadOnly}
+              className={cn(
+                fieldClass,
+                "mt-1.5 h-auto resize-none py-2 leading-relaxed",
+                isReadOnly && "cursor-not-allowed opacity-70",
+              )}
+            />
+          </div>
+
+          {isReadOnly && (
+            <p className="mt-3 inline-flex items-center gap-1 text-xs text-fg-subtle">
+              <Lock className="h-3 w-3" />
+              Audit is locked — ACPT observations are read-only.
+            </p>
+          )}
+        </StepShell>
+      )}
+
       {step === "review" && audit && (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="flex flex-col gap-4">
@@ -903,6 +1046,40 @@ export function NewAuditWizard({
                   value={audit.auditCode}
                 />
               </dl>
+
+              {/* ACPT summary — only shown when at least one field is filled */}
+              {(acptCategory || acptLevel2.trim() || acptLevel3.trim()) && (
+                <div className="mt-4 rounded-md border border-border bg-bg-muted p-3">
+                  <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                    ACPT observations
+                  </p>
+                  <dl className="grid grid-cols-1 gap-2 text-sm">
+                    {acptCategory && (
+                      <ReviewItem label="Category" value={acptCategory} />
+                    )}
+                    {acptLevel2.trim() && (
+                      <div>
+                        <dt className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                          Level 2
+                        </dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap text-sm text-fg">
+                          {acptLevel2.trim()}
+                        </dd>
+                      </div>
+                    )}
+                    {acptLevel3.trim() && (
+                      <div>
+                        <dt className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                          Level 3
+                        </dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap text-sm text-fg">
+                          {acptLevel3.trim()}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
             </StepShell>
 
             <StepShell title="Overall comment">
@@ -1010,7 +1187,8 @@ export function NewAuditWizard({
               Back
             </button>
 
-            {step === "scorecard" && audit?.sections.length ? (
+            {(step === "scorecard" && audit?.sections.length) ||
+            step === "acpt" ? (
               <button
                 type="button"
                 onClick={() => void flushAutosave()}

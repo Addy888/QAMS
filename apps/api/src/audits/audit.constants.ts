@@ -37,3 +37,21 @@ export const OVERALL_COMMENT_MAX = 2000;
 
 /** Max length for any `remark`. */
 export const REMARK_MAX = 500;
+
+/**
+ * Valid ACPT category values. ACPT is a qualitative, non-scoring section
+ * where the supervisor categorises and describes call observations.
+ *
+ * Categories are intentionally stored as plain strings so they can be
+ * surfaced by the frontend without a DB enum migration.
+ */
+export const ACPT_CATEGORIES = [
+  "Agent",
+  "Customer",
+  "Process",
+  "Technology",
+] as const;
+export type AcptCategory = (typeof ACPT_CATEGORIES)[number];
+
+/** Max length for an ACPT level-2 or level-3 free-text entry. */
+export const ACPT_LEVEL_MAX = 4000;

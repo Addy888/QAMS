@@ -58,7 +58,20 @@ export interface AuditListItem {
   callReference: string;
   groupNameSnapshot: string;
   projectNameSnapshot: string;
+  /**
+   * Sum of weights for passing (YES) questions. Combine with
+   * `applicablePoints` to show "earned / applicable (pct%)" in the UI.
+   */
   totalScore: number | null;
+  /**
+   * Sum of weights for YES + NO questions (N/A excluded from denominator).
+   * Null on legacy audits — fall back to displaying finalScore as a plain %.
+   */
+  applicablePoints: number | null;
+  /**
+   * Final percentage: (totalScore / applicablePoints) * 100, or 0 if fatal.
+   * For legacy rows (applicablePoints = null) this is the old 0-100 value.
+   */
   finalScore: number | null;
   fatalTriggered: boolean;
   acknowledged: boolean;
@@ -75,6 +88,17 @@ export interface AuditListItem {
   reviewedAt: string | null;
   /** Legacy — null on all newly-created audits. */
   completedAt: string | null;
+
+  // -----------------------------------------------------------------------
+  //  ACPT — qualitative, non-scoring call notes.
+  //  All three are null on legacy audits (pre-ACPT migration).
+  // -----------------------------------------------------------------------
+  /** One of: "Agent" | "Customer" | "Process" | "Technology". Null if not filled. */
+  acptCategory: string | null;
+  /** Free-text Level 2 observations. Null if not filled. */
+  acptLevel2: string | null;
+  /** Free-text Level 3 observations. Null if not filled. */
+  acptLevel3: string | null;
 }
 
 export interface AuditQuestionOption {

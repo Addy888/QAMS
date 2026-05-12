@@ -237,9 +237,20 @@ model Audit {
   callReference String  @map("call_reference") @db.VarChar(120)
 
   /// Server-calculated, persisted on every save.
-  totalScore   Float?  @map("total_score")
-  finalScore   Float?  @map("final_score")
-  fatalTriggered Boolean @default(false) @map("fatal_triggered")
+  /// totalScore      = sum of weights for passing (YES) questions.
+  /// applicablePoints = sum of weights for YES + NO questions (N/A excluded).
+  /// finalScore      = (totalScore / applicablePoints) * 100, or 0 if fatal.
+  totalScore       Float?   @map("total_score")
+  applicablePoints Float?   @map("applicable_points")
+  finalScore       Float?   @map("final_score")
+  fatalTriggered   Boolean  @default(false) @map("fatal_triggered")
+
+  /// ACPT — qualitative call notes captured by the supervisor.
+  /// These fields are strictly informational and never influence scoring.
+  /// Category is one of: Agent | Customer | Process | Technology.
+  acptCategory  String?  @map("acpt_category") @db.VarChar(24)
+  acptLevel2    String?  @map("acpt_level2")   @db.Text
+  acptLevel3    String?  @map("acpt_level3")   @db.Text
 
   overallComment String? @db.Text @map("overall_comment")
 

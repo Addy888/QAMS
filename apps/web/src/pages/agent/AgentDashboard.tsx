@@ -28,6 +28,7 @@ import { TimeFilterChips } from "@/features/dashboard/components/TimeFilterChips
 import {
   cn,
   dateRangeFor,
+  formatAuditScore,
   formatDate,
   isWithinRange,
   type DateRangePreset,
@@ -154,10 +155,10 @@ export default function AgentDashboard() {
           value={
             isFiltered
               ? filteredStats.avg !== null
-                ? `${filteredStats.avg.toFixed(1)} / 100`
+                ? `${filteredStats.avg.toFixed(1)}%`
                 : "—"
               : summary && summary.averageScore !== null
-                ? `${summary.averageScore.toFixed(1)} / 100`
+                ? `${summary.averageScore.toFixed(1)}%`
                 : "—"
           }
           icon={TrendingUp}
@@ -171,10 +172,14 @@ export default function AgentDashboard() {
           value={
             isFiltered
               ? filteredStats.latest && filteredStats.latest.finalScore !== null
-                ? `${filteredStats.latest.finalScore.toFixed(1)} / 100`
+                ? formatAuditScore(
+                    filteredStats.latest.finalScore,
+                    filteredStats.latest.totalScore,
+                    filteredStats.latest.applicablePoints,
+                  )
                 : "—"
               : summary && summary.latestScore !== null
-                ? `${summary.latestScore.toFixed(1)} / 100`
+                ? `${summary.latestScore.toFixed(1)}%`
                 : "—"
           }
           icon={Trophy}
@@ -263,9 +268,7 @@ export default function AgentDashboard() {
                         scoreToneClass(a.finalScore, a.fatalTriggered),
                       )}
                     >
-                      {a.finalScore === null
-                        ? "—"
-                        : `${a.finalScore.toFixed(0)}`}
+                      {formatAuditScore(a.finalScore, a.totalScore, a.applicablePoints)}
                     </span>
                   </Link>
                 </li>
@@ -322,9 +325,11 @@ export default function AgentDashboard() {
                   ),
                 )}
               >
-                {latestFeedback.finalScore === null
-                  ? "—"
-                  : `${latestFeedback.finalScore.toFixed(1)} / 100`}
+                {formatAuditScore(
+                  latestFeedback.finalScore,
+                  latestFeedback.totalScore,
+                  latestFeedback.applicablePoints,
+                )}
               </p>
               <p className="text-sm leading-relaxed text-fg-muted">
                 Open the audit to read the parameter-by-parameter breakdown and
@@ -388,9 +393,7 @@ export default function AgentDashboard() {
                           scoreToneClass(a.finalScore, a.fatalTriggered),
                         )}
                       >
-                        {a.finalScore === null
-                          ? "—"
-                          : `${a.finalScore.toFixed(0)}`}
+                        {formatAuditScore(a.finalScore, a.totalScore, a.applicablePoints)}
                       </span>
                     </div>
                   </Link>

@@ -159,3 +159,33 @@ export function qualityLabel(
   if (finalScore >= 50) return "AVERAGE";
   return "BAD";
 }
+
+/**
+ * Format an audit score for display.
+ *
+ * New audits (applicablePoints is set):
+ *   → "50 / 75 (66.7%)"   — earned / applicable (percentage)
+ *
+ * Legacy audits (applicablePoints is null) or when only the percentage
+ * is available:
+ *   → "50.0%"
+ *
+ * No answers yet (finalScore is null):
+ *   → "—"
+ */
+export function formatAuditScore(
+  finalScore: number | null | undefined,
+  totalScore?: number | null,
+  applicablePoints?: number | null,
+): string {
+  if (finalScore === null || finalScore === undefined) return "—";
+  if (
+    totalScore !== null &&
+    totalScore !== undefined &&
+    applicablePoints !== null &&
+    applicablePoints !== undefined
+  ) {
+    return `${totalScore} / ${applicablePoints} (${finalScore.toFixed(1)}%)`;
+  }
+  return `${finalScore.toFixed(1)}%`;
+}

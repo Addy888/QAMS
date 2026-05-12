@@ -250,6 +250,28 @@ export class AuditsService {
       });
     }
 
+    // Persist ACPT fields when any are present in the payload.
+    if (
+      dto.acptCategory !== undefined ||
+      dto.acptLevel2 !== undefined ||
+      dto.acptLevel3 !== undefined
+    ) {
+      await this.prisma.audit.update({
+        where: { id: audit.id },
+        data: {
+          ...(dto.acptCategory !== undefined
+            ? { acptCategory: dto.acptCategory ?? null }
+            : {}),
+          ...(dto.acptLevel2 !== undefined
+            ? { acptLevel2: dto.acptLevel2 ?? null }
+            : {}),
+          ...(dto.acptLevel3 !== undefined
+            ? { acptLevel3: dto.acptLevel3 ?? null }
+            : {}),
+        },
+      });
+    }
+
     if (dto.answers && dto.answers.length > 0) {
       await this.upsertAnswers(audit.id, dto.answers);
     }
@@ -301,6 +323,29 @@ export class AuditsService {
         data: { overallComment: dto.overallComment ?? null },
       });
     }
+
+    // Persist ACPT fields when any are present in the submit payload.
+    if (
+      dto.acptCategory !== undefined ||
+      dto.acptLevel2 !== undefined ||
+      dto.acptLevel3 !== undefined
+    ) {
+      await this.prisma.audit.update({
+        where: { id: audit.id },
+        data: {
+          ...(dto.acptCategory !== undefined
+            ? { acptCategory: dto.acptCategory ?? null }
+            : {}),
+          ...(dto.acptLevel2 !== undefined
+            ? { acptLevel2: dto.acptLevel2 ?? null }
+            : {}),
+          ...(dto.acptLevel3 !== undefined
+            ? { acptLevel3: dto.acptLevel3 ?? null }
+            : {}),
+        },
+      });
+    }
+
     if (dto.answers && dto.answers.length > 0) {
       await this.upsertAnswers(audit.id, dto.answers);
     }
@@ -892,6 +937,7 @@ export class AuditsService {
       where: { id: auditId },
       data: {
         totalScore: result.totalScore,
+        applicablePoints: result.applicablePoints,
         finalScore: result.finalScore,
         fatalTriggered: result.fatalTriggered,
       },
@@ -919,11 +965,15 @@ function toListItem(row: {
   groupNameSnapshot: string;
   projectNameSnapshot: string;
   totalScore: number | null;
+  applicablePoints?: number | null;
   finalScore: number | null;
   fatalTriggered: boolean;
   acknowledged: boolean;
   acknowledgmentMode?: string | null;
   acknowledgmentRemark?: string | null;
+  acptCategory?: string | null;
+  acptLevel2?: string | null;
+  acptLevel3?: string | null;
   agent: { id: string; name: string; username: string };
   supervisor: { id: string; name: string; username: string };
   project: { id: number; projectName: string; groupName: string };
@@ -942,6 +992,7 @@ function toListItem(row: {
     groupNameSnapshot: row.groupNameSnapshot,
     projectNameSnapshot: row.projectNameSnapshot,
     totalScore: row.totalScore,
+    applicablePoints: row.applicablePoints ?? null,
     finalScore: row.finalScore,
     fatalTriggered: row.fatalTriggered,
     agent: row.agent,
@@ -956,6 +1007,9 @@ function toListItem(row: {
     acknowledgmentMode: row.acknowledgmentMode ?? null,
     acknowledgmentRemark: row.acknowledgmentRemark ?? null,
     completedAt: row.completedAt,
+    acptCategory: row.acptCategory ?? null,
+    acptLevel2: row.acptLevel2 ?? null,
+    acptLevel3: row.acptLevel3 ?? null,
   };
 }
 
@@ -1002,4 +1056,3 @@ function parseOptionsForResponse(
   }
   return null;
 }
-

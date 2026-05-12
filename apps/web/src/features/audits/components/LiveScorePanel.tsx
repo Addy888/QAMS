@@ -13,8 +13,11 @@ interface SectionPreview {
   id: number;
   title: string;
   pointsEarned: number;
-  pointsPossible: number;
-  /** Section completion as %. Display-only — independent of overall total. */
+  /** Sum of weights for YES + NO questions (applicable denominator). */
+  applicablePoints: number;
+  /** Sum of weights for N/A questions (excluded from denominator). */
+  excludedPoints: number;
+  /** Section score as a % over applicable questions only. */
   percent: number | null;
   answered: number;
   total: number;
@@ -22,10 +25,21 @@ interface SectionPreview {
 }
 
 interface AuditPreview {
-  /** Sum of weights for passing parameters (raw — fatal-agnostic). */
-  raw: number | null;
-  /** Final score: raw, but forced to 0 when any fatal parameter has not passed. */
-  final: number | null;
+  /** Sum of weights for passing (YES) questions. */
+  earnedPoints: number | null;
+  /** Sum of weights for YES + NO questions (applicable denominator). */
+  applicablePoints: number | null;
+  /** Sum of weights for N/A questions. */
+  excludedPoints: number;
+  /**
+   * Raw percentage over applicable: earnedPoints / applicablePoints * 100.
+   * Fatal-agnostic — shows the "real" score before the fatal override.
+   */
+  rawPct: number | null;
+  /**
+   * Final score: rawPct, but forced to 0 when any fatal parameter failed.
+   */
+  finalPct: number | null;
   fatal: boolean;
   sections: SectionPreview[];
   answeredCount: number;
@@ -36,19 +50,24 @@ interface AuditPreview {
  * Mirror of the backend's `AuditScoreService.computeAudit` — kept in lockstep
  * so the on-screen number always matches what the server will persist.
  *
- *  - PASS  → +`weight` points
- *  - FAIL / N/A / unanswered → 0
- *  - any fatal that did not pass → final = 0 (raw stays informative)
+ *   YES answer → earns weight, counts in denominator
+ *   NO  answer → earns 0,      counts in denominator
+ *   N/A answer → earns 0,      EXCLUDED from denominator
+ *   any fatal that did not pass (and is not N/A) → final forced to 0
  */
 function previewScore(audit: AuditDetail, answers: AnswerDraftMap): AuditPreview {
-  let total = 0;
+  let totalEarned = 0;
+  let totalApplicable = 0;
+  let totalExcluded = 0;
   let fatalTriggered = false;
   let answeredCount = 0;
   let totalQuestions = 0;
+  let applicableAnsweredCount = 0;
 
   const sections: SectionPreview[] = audit.sections.map((section) => {
     let sectionEarned = 0;
-    let sectionPossible = 0;
+    let sectionApplicable = 0;
+    let sectionExcluded = 0;
     let sectionFatal = false;
     let sectionAnswered = 0;
 
@@ -62,12 +81,25 @@ function previewScore(audit: AuditDetail, answers: AnswerDraftMap): AuditPreview
 
       if (!q.scoring) continue;
 
+      // N/A: excluded entirely from denominator and from fatal rule.
+      if (isAnswered && isNA(q, value)) {
+        sectionExcluded += q.weight;
+        totalExcluded += q.weight;
+        continue;
+      }
+
+      if (isAnswered) {
+        applicableAnsweredCount += 1;
+        sectionApplicable += q.weight;
+        totalApplicable += q.weight;
+      }
+
       const passed = isAnswered && isPass(q, value);
       const earned = passed ? q.weight : 0;
 
       // Fatal flag triggers as soon as a fatal question has an
-      // *answered* non-pass value. Unanswered fatals do not flip the
-      // flag yet — they should fail submission, not preview as fatal.
+      // *answered*, non-N/A, non-pass value. Unanswered fatals do not
+      // flip the flag yet — they fail at submission, not live preview.
       const fatalMiss = q.fatal && isAnswered && !passed;
       if (fatalMiss) {
         fatalTriggered = true;
@@ -75,22 +107,22 @@ function previewScore(audit: AuditDetail, answers: AnswerDraftMap): AuditPreview
       }
 
       sectionEarned += earned;
-      sectionPossible += q.weight;
-      total += earned;
+      totalEarned += earned;
     }
 
     answeredCount += sectionAnswered;
 
     const percent =
-      sectionPossible > 0
-        ? Math.round((sectionEarned / sectionPossible) * 1000) / 10
+      sectionApplicable > 0
+        ? Math.round((sectionEarned / sectionApplicable) * 1000) / 10
         : null;
 
     return {
       id: section.id,
       title: section.title,
       pointsEarned: sectionEarned,
-      pointsPossible: sectionPossible,
+      applicablePoints: sectionApplicable,
+      excludedPoints: sectionExcluded,
       percent,
       answered: sectionAnswered,
       total: section.questions.length,
@@ -98,19 +130,40 @@ function previewScore(audit: AuditDetail, answers: AnswerDraftMap): AuditPreview
     };
   });
 
-  // Raw is whatever has been earned so far — show it from the very first
-  // answered question, even if no fatal questions are answered yet.
-  const raw = answeredCount === 0 ? null : Math.round(total * 10) / 10;
-  const final = raw === null ? null : fatalTriggered ? 0 : raw;
+  if (applicableAnsweredCount === 0) {
+    return {
+      earnedPoints: null,
+      applicablePoints: null,
+      excludedPoints: totalExcluded,
+      rawPct: null,
+      finalPct: null,
+      fatal: fatalTriggered,
+      sections,
+      answeredCount,
+      totalQuestions,
+    };
+  }
+
+  const rawPct = Math.round((totalEarned / totalApplicable) * 1000) / 10;
+  const finalPct = fatalTriggered ? 0 : rawPct;
 
   return {
-    raw,
-    final,
+    earnedPoints: totalEarned,
+    applicablePoints: totalApplicable,
+    excludedPoints: totalExcluded,
+    rawPct,
+    finalPct,
     fatal: fatalTriggered,
     sections,
     answeredCount,
     totalQuestions,
   };
+}
+
+/** True when a YES_NO question was answered N/A. */
+function isNA(q: AuditQuestion, raw: string | null): boolean {
+  if (!raw) return false;
+  return q.type === AuditQuestionType.YES_NO && raw.toLowerCase() === "na";
 }
 
 function isPass(q: AuditQuestion, raw: string | null): boolean {
@@ -154,14 +207,26 @@ const QUALITY_TONE: Record<"GOOD" | "AVERAGE" | "BAD", string> = {
 export function LiveScorePanel({ audit, answers }: LiveScorePanelProps) {
   const preview = useMemo(() => previewScore(audit, answers), [audit, answers]);
 
+  // "50 / 75 (66.7%)" — the canonical display format.
+  const finalLabel = (() => {
+    if (preview.finalPct === null) return "—";
+    if (preview.applicablePoints === null) return `${preview.finalPct.toFixed(1)}%`;
+    return `${preview.earnedPoints} / ${preview.applicablePoints} (${preview.finalPct.toFixed(1)}%)`;
+  })();
+
+  // Raw percentage is shown only when fatal forces the final to 0 so the
+  // supervisor can still see the underlying earned percentage.
+  const showRaw = preview.fatal && preview.rawPct !== null;
   const rawLabel =
-    preview.raw === null ? "—" : `${preview.raw.toFixed(1)} / 100`;
-  const finalLabel =
-    preview.final === null ? "—" : `${preview.final.toFixed(1)} / 100`;
+    preview.rawPct === null
+      ? "—"
+      : preview.applicablePoints !== null
+        ? `${preview.earnedPoints} / ${preview.applicablePoints} (${preview.rawPct.toFixed(1)}%)`
+        : `${preview.rawPct.toFixed(1)}%`;
 
   // Operational quality label is a UI hint based on the *final* score.
   // Fatal triggers always read as BAD.
-  const quality = qualityLabel(preview.final, preview.fatal);
+  const quality = qualityLabel(preview.finalPct, preview.fatal);
 
   return (
     <aside className="flex flex-col gap-3 rounded-lg border border-border bg-bg-elevated p-4 shadow-elev-1">
@@ -183,14 +248,22 @@ export function LiveScorePanel({ audit, answers }: LiveScorePanelProps) {
           <span className="text-[11px] text-fg-subtle">final</span>
         </div>
 
-        {/* Raw score is always visible so the supervisor can see how
-            close they are independent of fatal status. */}
-        <div className="mt-1 flex items-baseline gap-2">
-          <p className="text-sm font-medium text-fg-muted tabular-nums">
-            {rawLabel}
+        {/* Raw score shown only when fatal override is active */}
+        {showRaw && (
+          <div className="mt-1 flex items-baseline gap-2">
+            <p className="text-sm font-medium text-fg-muted tabular-nums">
+              {rawLabel}
+            </p>
+            <span className="text-[11px] text-fg-subtle">raw (before fatal)</span>
+          </div>
+        )}
+
+        {/* N/A exclusion hint */}
+        {preview.excludedPoints > 0 && (
+          <p className="mt-1 text-[10px] text-fg-subtle">
+            {preview.excludedPoints} pts excluded (N/A)
           </p>
-          <span className="text-[11px] text-fg-subtle">raw</span>
-        </div>
+        )}
 
         {/* Status row: fatal badge or "all clear" hint, plus quality label */}
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -231,7 +304,8 @@ export function LiveScorePanel({ audit, answers }: LiveScorePanelProps) {
               <p className="truncate text-xs font-medium text-fg">{s.title}</p>
               <p className="text-[10px] text-fg-subtle">
                 {s.answered}/{s.total} answered ·{" "}
-                {s.pointsEarned}/{s.pointsPossible} pts
+                {s.pointsEarned}/{s.applicablePoints} pts
+                {s.excludedPoints > 0 && ` · ${s.excludedPoints} excl.`}
               </p>
             </div>
             <span

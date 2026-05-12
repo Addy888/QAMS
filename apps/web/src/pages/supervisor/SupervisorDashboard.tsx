@@ -27,6 +27,7 @@ import {
 import {
   cn,
   dateRangeFor,
+  formatAuditScore,
   formatDateTime,
   isWithinRange,
   type DateRangePreset,
@@ -281,9 +282,7 @@ export default function SupervisorDashboard() {
                       scoreToneClass(row.finalScore, row.fatalTriggered),
                     )}
                   >
-                    {row.finalScore === null
-                      ? "—"
-                      : `${row.finalScore.toFixed(1)}%`}
+                    {formatAuditScore(row.finalScore, row.totalScore, row.applicablePoints)}
                   </span>
                   <span className="hidden whitespace-nowrap text-xs text-fg-subtle sm:inline">
                     {formatDateTime(row.updatedAt)}

@@ -69,6 +69,7 @@ export class AgentAuditsService {
       groupNameSnapshot: r.groupNameSnapshot,
       projectNameSnapshot: r.projectNameSnapshot,
       totalScore: r.totalScore,
+      applicablePoints: r.applicablePoints ?? null,
       finalScore: r.finalScore,
       fatalTriggered: r.fatalTriggered,
       agent: r.agent,
@@ -83,6 +84,9 @@ export class AgentAuditsService {
       acknowledgmentMode: r.acknowledgmentMode ?? null,
       acknowledgmentRemark: r.acknowledgmentRemark ?? null,
       completedAt: r.completedAt,
+      acptCategory: r.acptCategory ?? null,
+      acptLevel2: r.acptLevel2 ?? null,
+      acptLevel3: r.acptLevel3 ?? null,
     }));
   }
 
@@ -257,7 +261,7 @@ export class AgentAuditsService {
   //  Helpers
   // -------------------------------------------------------------------
 
-  private requireAgent(actor: AuthorizedActor) {
+  private requireAgent(actor: AuthorizedActor): void {
     if (actor.role !== Role.AGENT) {
       throw new ForbiddenException("Agent-only endpoint");
     }

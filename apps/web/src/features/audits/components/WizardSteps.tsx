@@ -3,10 +3,10 @@ import { cn } from "@/lib/utils";
 
 export type WizardStepId =
   | "agent"
-  | "group"
-  | "project"
+  | "group-project"
   | "call"
   | "scorecard"
+  | "acpt"
   | "review";
 
 export interface WizardStep {
@@ -17,10 +17,10 @@ export interface WizardStep {
 
 export const WIZARD_STEPS: WizardStep[] = [
   { id: "agent", label: "Agent", description: "Pick the agent under review" },
-  { id: "group", label: "Group", description: "Group / line of business" },
-  { id: "project", label: "Project", description: "Project the call belongs to" },
+  { id: "group-project", label: "Group & Project", description: "Line of business & project" },
   { id: "call", label: "Call", description: "Reference identifier" },
   { id: "scorecard", label: "Score", description: "Score against QA template" },
+  { id: "acpt", label: "ACPT", description: "Qualitative call observations" },
   { id: "review", label: "Review", description: "Confirm and submit" },
 ];
 
@@ -99,4 +99,3 @@ export function WizardSteps({ current, reachable, onJump }: WizardStepsProps) {
   );
 }
 
-export default WizardSteps;

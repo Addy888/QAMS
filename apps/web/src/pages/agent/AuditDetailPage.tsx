@@ -19,7 +19,7 @@ import { AppCard } from "@/components/ui/AppCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 import Modal from "@/components/ui/Modal";
-import { cn, formatDateTime, qualityLabel } from "@/lib/utils";
+import { cn, formatAuditScore, formatDateTime, qualityLabel } from "@/lib/utils";
 import {
   acknowledgeAudit,
   getMyAuditById,
@@ -289,9 +289,7 @@ export default function AuditDetailPage() {
                 scoreToneClass(audit.finalScore, audit.fatalTriggered),
               )}
             >
-              {audit.finalScore === null
-                ? "—"
-                : `${audit.finalScore.toFixed(1)} / 100`}
+              {formatAuditScore(audit.finalScore, audit.totalScore, audit.applicablePoints)}
             </p>
             {(() => {
               const q = qualityLabel(audit.finalScore, audit.fatalTriggered);
@@ -315,7 +313,9 @@ export default function AuditDetailPage() {
             })()}
             {audit.fatalTriggered && audit.totalScore !== null && (
               <p className="text-xs text-fg-subtle">
-                Raw score (before fatal): {audit.totalScore.toFixed(1)} / 100
+                {audit.applicablePoints !== null
+                  ? `Raw (before fatal): ${audit.totalScore} / ${audit.applicablePoints} (${((audit.totalScore / audit.applicablePoints) * 100).toFixed(1)}%)`
+                  : `Raw score (before fatal): ${audit.totalScore.toFixed(1)}%`}
               </p>
             )}
             {audit.fatalTriggered && (
@@ -354,6 +354,47 @@ export default function AuditDetailPage() {
           </p>
         )}
       </AppCard>
+
+      {/* ------- ACPT observations (if filled) ------------------------- */}
+      {(audit.acptCategory || audit.acptLevel2 || audit.acptLevel3) && (
+        <AppCard padding="md" className="mb-6">
+          <p className="mb-3 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+            ACPT — call observations
+          </p>
+          <dl className="flex flex-col gap-3 text-sm">
+            {audit.acptCategory && (
+              <div>
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                  Category
+                </dt>
+                <dd className="mt-0.5 text-sm font-medium text-fg">
+                  {audit.acptCategory}
+                </dd>
+              </div>
+            )}
+            {audit.acptLevel2 && (
+              <div>
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                  Level 2 — observations
+                </dt>
+                <dd className="mt-0.5 whitespace-pre-wrap text-sm leading-relaxed text-fg-muted">
+                  {audit.acptLevel2}
+                </dd>
+              </div>
+            )}
+            {audit.acptLevel3 && (
+              <div>
+                <dt className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                  Level 3 — root cause / detail
+                </dt>
+                <dd className="mt-0.5 whitespace-pre-wrap text-sm leading-relaxed text-fg-muted">
+                  {audit.acptLevel3}
+                </dd>
+              </div>
+            )}
+          </dl>
+        </AppCard>
+      )}
 
       {/* ------- Supervisor correction note (post-publish) -------------- */}
       {audit.supervisorCorrectionNote && (

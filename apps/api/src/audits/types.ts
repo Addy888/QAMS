@@ -11,7 +11,20 @@ export interface AuditListItem {
   callReference: string;
   groupNameSnapshot: string;
   projectNameSnapshot: string;
+  /**
+   * Sum of weights for passing (YES) questions. Use with `applicablePoints`
+   * to display "earned / applicable (percentage%)" in the UI.
+   */
   totalScore: number | null;
+  /**
+   * Sum of weights for YES + NO questions (N/A excluded).
+   * Null on legacy audits created before this scoring model was introduced.
+   */
+  applicablePoints: number | null;
+  /**
+   * Final percentage score: (totalScore / applicablePoints) * 100, forced to
+   * 0 if any fatal parameter failed. Null while unanswered.
+   */
   finalScore: number | null;
   fatalTriggered: boolean;
   agent: { id: string; name: string; username: string };
@@ -30,8 +43,33 @@ export interface AuditListItem {
   acknowledgmentMode: string | null;
   /** Optional remark left by the agent (mandatory for DISAGREED). */
   acknowledgmentRemark: string | null;
-  /** Legacy column — null on all newly-created audits. */
+  /** Legacy column -- null on all newly-created audits. */
   completedAt: Date | null;
+
+  // -----------------------------------------------------------------------
+  //  ACPT -- qualitative, non-scoring call notes captured by the supervisor.
+  //  All three are null on legacy audits (pre-ACPT migration).
+  // -----------------------------------------------------------------------
+  /** One of: "Agent" | "Customer" | "Process" | "Technology". Null if not filled. */
+  acptCategory: string | null;
+  /** Free-text Level 2 observations. Null if not filled. */
+  acptLevel2: string | null;
+  /** Free-text Level 3 observations. Null if not filled. */
+  acptLevel3: string | null;
+}
+
+export interface AuditQuestionOption {
+  label: string;
+  score: number;
+}
+
+export interface AuditAnswerResponse {
+  id: number;
+  questionId: number;
+  value: string | null;
+  normalizedScore: number | null;
+  fatalHit: boolean;
+  remark: string | null;
 }
 
 export interface AuditQuestionResponse {
@@ -48,20 +86,6 @@ export interface AuditQuestionResponse {
   options: AuditQuestionOption[] | null;
   /** Pre-loaded answer for resume/review. */
   answer: AuditAnswerResponse | null;
-}
-
-export interface AuditQuestionOption {
-  label: string;
-  score: number;
-}
-
-export interface AuditAnswerResponse {
-  id: number;
-  questionId: number;
-  value: string | null;
-  normalizedScore: number | null;
-  fatalHit: boolean;
-  remark: string | null;
 }
 
 export interface AuditSectionResponse {
@@ -81,13 +105,14 @@ export interface AuditDetailResponse extends AuditListItem {
   /**
    * Supervisor correction note added after publish. Null while the
    * supervisor hasn't appended one. The note never mutates score or
-   * answers — it's a separate, append-only field surfaced alongside.
+   * answers -- it's a separate, append-only field surfaced alongside.
    */
   supervisorCorrectionNote: string | null;
 }
 
 export interface AuditScoreSummary {
   totalScore: number | null;
+  applicablePoints: number | null;
   finalScore: number | null;
   fatalTriggered: boolean;
   sectionScores: { sectionId: number; score: number | null }[];

@@ -12,7 +12,7 @@ import { AppCard } from "@/components/ui/AppCard";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
-import { cn, formatDateTime, qualityLabel } from "@/lib/utils";
+import { cn, formatAuditScore, formatDateTime, qualityLabel } from "@/lib/utils";
 import AuditStatusBadge from "@/features/audits/components/AuditStatusBadge";
 import { AuditStatus } from "@/features/audits/types";
 import { getMyAudits } from "@/features/agent-audits/api";
@@ -25,11 +25,6 @@ const LENS_FILTERS: { label: string; value: StatusLens }[] = [
   { label: "Pending review", value: "PENDING" },
   { label: "Reviewed", value: "REVIEWED" },
 ];
-
-function formatScore(value: number | null): string {
-  if (value === null) return "—";
-  return `${value.toFixed(1)} / 100`;
-}
 
 function scoreToneClass(value: number | null, fatal: boolean): string {
   if (fatal) return "text-danger";
@@ -170,7 +165,7 @@ export default function MyAuditsPage() {
                 scoreToneClass(row.finalScore, row.fatalTriggered),
               )}
             >
-              {formatScore(row.finalScore)}
+              {formatAuditScore(row.finalScore, row.totalScore, row.applicablePoints)}
             </span>
             {row.fatalTriggered && (
               <span className="inline-flex items-center gap-1 text-[10px] text-danger">
