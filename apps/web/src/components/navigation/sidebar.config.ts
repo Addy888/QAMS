@@ -1,13 +1,12 @@
 import {
-  LayoutDashboard,
-  Users,
-  ShieldCheck,
-  Settings,
-  ClipboardList,
-  PhoneCall,
   BarChart3,
-  Trophy,
+  ClipboardList,
+  FolderKanban,
   History,
+  LayoutDashboard,
+  Trophy,
+  UserSquare2,
+  Users,
 } from "lucide-react";
 import type { NavGroup, UserRole } from "@/types/navigation";
 
@@ -29,8 +28,13 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
       heading: "Administration",
       items: [
         { label: "Users", path: "/admin/users", icon: Users },
-        { label: "Roles", path: "/admin/roles", icon: ShieldCheck },
-        { label: "Settings", path: "/admin/settings", icon: Settings },
+        { label: "Scorecards", path: "/admin/scorecards", icon: ClipboardList },
+      ],
+    },
+    {
+      heading: "Insights",
+      items: [
+        { label: "Quality overview", path: "/admin/reports", icon: BarChart3 },
       ],
     },
   ],
@@ -43,10 +47,16 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
       ],
     },
     {
+      heading: "Workspace",
+      items: [
+        { label: "Projects", path: "/supervisor/projects", icon: FolderKanban },
+        { label: "Agents", path: "/supervisor/agents", icon: UserSquare2 },
+      ],
+    },
+    {
       heading: "Operations",
       items: [
         { label: "Audits", path: "/supervisor/audits", icon: ClipboardList },
-        { label: "Calls", path: "/supervisor/calls", icon: PhoneCall },
         { label: "Reports", path: "/supervisor/reports", icon: BarChart3 },
       ],
     },
@@ -62,8 +72,13 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
     {
       heading: "Performance",
       items: [
+        { label: "My Audits", path: "/agent/audits", icon: ClipboardList },
         { label: "My Scores", path: "/agent/scores", icon: Trophy },
-        { label: "Audit History", path: "/agent/audits", icon: History },
+        {
+          label: "Audit History",
+          path: "/agent/audits?lens=REVIEWED",
+          icon: History,
+        },
       ],
     },
   ],

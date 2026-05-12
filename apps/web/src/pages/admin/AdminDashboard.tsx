@@ -1,58 +1,349 @@
-import { Download, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  ArrowUpRight,
+  ClipboardCheck,
+  ClipboardList,
+  ShieldCheck,
+  Star,
+  UserPlus,
+  UserSquare2,
+  Users,
+} from "lucide-react";
 import PageContainer from "@/layouts/PageContainer";
 import { WelcomeHeader } from "@/features/dashboard/components/WelcomeHeader";
-import { StatGrid } from "@/features/dashboard/components/StatGrid";
-import { RecentActivityCard } from "@/features/dashboard/components/RecentActivityCard";
-import { PerformancePlaceholder } from "@/features/dashboard/components/PerformancePlaceholder";
-import { ADMIN_STATS, RECENT_ACTIVITY } from "@/features/dashboard/mock";
+import { TimeFilterChips } from "@/features/dashboard/components/TimeFilterChips";
+import { StatCard } from "@/components/ui/StatCard";
 import { AppCard } from "@/components/ui/AppCard";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { AddUserDialog } from "@/features/users/components/AddUserDialog";
+import { listUsers, type ManagedUser } from "@/features/users/api";
+import { listAudits } from "@/features/audits/api";
+import {
+  AuditStatus,
+  type AuditListItem,
+} from "@/features/audits/types";
+import {
+  dateRangeFor,
+  formatDate,
+  isWithinRange,
+  type DateRangePreset,
+} from "@/lib/utils";
 
+/**
+ * Admin dashboard — workspace-wide directory + audit KPIs. The time
+ * filter applies to the audit metrics; user counts are static (a user
+ * is created once and persists, so range-filtering them produces a
+ * misleading "no users" empty state).
+ */
 export default function AdminDashboard() {
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [audits, setAudits] = useState<AuditListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [range, setRange] = useState<DateRangePreset>("all");
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [u, a] = await Promise.all([listUsers(), listAudits()]);
+      setUsers(u);
+      setAudits(a);
+    } catch (e) {
+      console.error(e);
+      setError("Could not load dashboard data.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchAll();
+  }, [fetchAll]);
+
+  const filteredAudits = useMemo(() => {
+    const r = dateRangeFor(range);
+    return audits.filter((a) => isWithinRange(a.createdAt, r));
+  }, [audits, range]);
+
+  const userStats = useMemo(() => {
+    const total = users.length;
+    const active = users.filter((u) => u.isActive).length;
+    const supervisors = users.filter((u) => u.role === "SUPERVISOR").length;
+    const agents = users.filter((u) => u.role === "AGENT").length;
+    return { total, active, supervisors, agents };
+  }, [users]);
+
+  const auditStats = useMemo(() => {
+    const total = filteredAudits.length;
+    const submitted = filteredAudits.filter(
+      (a) => a.status === AuditStatus.SUBMITTED,
+    ).length;
+    const published = filteredAudits.filter(
+      (a) =>
+        a.status === AuditStatus.PUBLISHED ||
+        a.status === AuditStatus.REVIEWED,
+    );
+    const reviewed = filteredAudits.filter(
+      (a) => a.status === AuditStatus.REVIEWED,
+    ).length;
+
+    const scored = published.filter(
+      (a) => a.finalScore !== null && !a.fatalTriggered,
+    );
+    const avgScore =
+      scored.length > 0
+        ? scored.reduce((acc, a) => acc + (a.finalScore ?? 0), 0) /
+          scored.length
+        : null;
+
+    return {
+      total,
+      submitted,
+      published: published.length,
+      reviewed,
+      avgScore,
+    };
+  }, [filteredAudits]);
+
+  const recentUsers = useMemo(() => {
+    return [...users]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )
+      .slice(0, 6);
+  }, [users]);
+
   return (
     <PageContainer maxWidth="xl">
       <WelcomeHeader
         eyebrow="Admin overview"
-        description="Monitor system health, audit progress and user activity at a glance."
+        description="Workspace-wide users, audits, and the global QA template."
         actions={
           <>
-            <button className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg">
-              <Download className="h-4 w-4" /> Export
-            </button>
-            <button className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90">
-              <Plus className="h-4 w-4" /> Invite user
+            <Link
+              to="/admin/users"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+            >
+              <Users className="h-4 w-4" /> View users
+            </Link>
+            <button
+              onClick={() => setAddUserOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg shadow-elev-1 hover:opacity-90"
+            >
+              <UserPlus className="h-4 w-4" /> Add user
             </button>
           </>
         }
       />
 
-      <StatGrid stats={ADMIN_STATS} />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <TimeFilterChips value={range} onChange={setRange} />
+        <p className="text-xs text-fg-subtle">
+          Audit KPIs honour the selected range — user counts are workspace-wide.
+        </p>
+      </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <PerformancePlaceholder
-            title="Workspace activity"
-            description="Workspace KPI charts will appear here once feature modules begin shipping."
-          />
-        </div>
+      {/* Audit KPIs — driven by the time filter */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Audits in range"
+          value={loading ? "—" : auditStats.total}
+          icon={ClipboardList}
+          loading={loading}
+        />
+        <StatCard
+          label="Submitted"
+          value={loading ? "—" : auditStats.submitted}
+          icon={ClipboardCheck}
+          description="Awaiting publish"
+          loading={loading}
+        />
+        <StatCard
+          label="Published"
+          value={loading ? "—" : auditStats.published}
+          icon={ClipboardCheck}
+          description={`${auditStats.reviewed} reviewed`}
+          loading={loading}
+        />
+        <StatCard
+          label="Avg score"
+          value={
+            loading
+              ? "—"
+              : auditStats.avgScore === null
+                ? "—"
+                : `${auditStats.avgScore.toFixed(1)}%`
+          }
+          icon={Star}
+          description={`across ${auditStats.published} published`}
+          loading={loading}
+        />
+      </div>
+
+      {/* Workspace directory snapshot */}
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Total users"
+          value={loading ? "—" : userStats.total}
+          icon={Users}
+          description={`${userStats.active} active`}
+          loading={loading}
+        />
+        <StatCard
+          label="Supervisors"
+          value={loading ? "—" : userStats.supervisors}
+          icon={ShieldCheck}
+          loading={loading}
+        />
+        <StatCard
+          label="Agents"
+          value={loading ? "—" : userStats.agents}
+          icon={UserSquare2}
+          loading={loading}
+        />
+        <StatCard
+          label="QA template"
+          value="Global"
+          icon={ClipboardList}
+          description="Shared across all audits"
+        />
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <AppCard
+          padding="none"
+          className="lg:col-span-2"
+          header={
+            <>
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight text-fg">
+                  Recently added users
+                </h3>
+                <p className="text-xs text-fg-subtle">
+                  Latest entries in the directory
+                </p>
+              </div>
+              <Link
+                to="/admin/users"
+                className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+              >
+                View all <ArrowUpRight className="h-3 w-3" />
+              </Link>
+            </>
+          }
+        >
+          {loading ? (
+            <div className="p-5">
+              <LoadingSkeleton rows={5} />
+            </div>
+          ) : error ? (
+            <EmptyState
+              title="Couldn't load dashboard"
+              description={error}
+              className="border-none bg-transparent"
+            />
+          ) : recentUsers.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No users yet"
+              description="Add your first supervisor or agent to get started."
+              className="border-none bg-transparent"
+            />
+          ) : (
+            <ul className="divide-y divide-border">
+              {recentUsers.map((u) => (
+                <li
+                  key={u.id}
+                  className="flex items-center gap-3 px-5 py-2.5"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold text-accent">
+                    {u.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-fg">
+                      {u.name}
+                    </p>
+                    <p className="truncate text-xs text-fg-subtle">
+                      @{u.username}
+                    </p>
+                  </div>
+                  <StatusBadge
+                    tone={
+                      u.role === "ADMIN"
+                        ? "info"
+                        : u.role === "SUPERVISOR"
+                          ? "success"
+                          : "neutral"
+                    }
+                  >
+                    {u.role.charAt(0) + u.role.slice(1).toLowerCase()}
+                  </StatusBadge>
+                  <span className="hidden whitespace-nowrap text-xs text-fg-subtle sm:inline">
+                    {formatDate(u.createdAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </AppCard>
 
         <AppCard
           header={
             <div>
               <h3 className="text-sm font-semibold tracking-tight text-fg">
-                System status
+                Quick actions
               </h3>
-              <p className="text-xs text-fg-subtle">Live placeholder</p>
+              <p className="text-xs text-fg-subtle">Most common admin tasks</p>
             </div>
           }
         >
-          <LoadingSkeleton rows={4} />
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => setAddUserOpen(true)}
+              className="inline-flex h-10 items-center justify-between gap-2 rounded-md border border-border bg-bg-elevated px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+            >
+              <span className="inline-flex items-center gap-2">
+                <UserPlus className="h-4 w-4 text-accent" />
+                Add user
+              </span>
+              <ArrowUpRight className="h-3.5 w-3.5 text-fg-subtle" />
+            </button>
+            <Link
+              to="/admin/users"
+              className="inline-flex h-10 items-center justify-between gap-2 rounded-md border border-border bg-bg-elevated px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Users className="h-4 w-4 text-accent" />
+                Manage users
+              </span>
+              <ArrowUpRight className="h-3.5 w-3.5 text-fg-subtle" />
+            </Link>
+            <Link
+              to="/admin/scorecards"
+              className="inline-flex h-10 items-center justify-between gap-2 rounded-md border border-border bg-bg-elevated px-3 text-sm font-medium text-fg-muted hover:bg-bg-muted hover:text-fg"
+            >
+              <span className="inline-flex items-center gap-2">
+                <ClipboardList className="h-4 w-4 text-accent" />
+                Edit QA template
+              </span>
+              <ArrowUpRight className="h-3.5 w-3.5 text-fg-subtle" />
+            </Link>
+          </div>
         </AppCard>
       </div>
 
-      <div className="mt-6">
-        <RecentActivityCard rows={RECENT_ACTIVITY} />
-      </div>
+      <AddUserDialog
+        open={addUserOpen}
+        onOpenChange={setAddUserOpen}
+        actorRole="ADMIN"
+        onCreated={() => void fetchAll()}
+      />
     </PageContainer>
   );
 }

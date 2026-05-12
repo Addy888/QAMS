@@ -6,6 +6,15 @@ import DashboardLayout from "@/layouts/DashboardLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import SupervisorDashboard from "@/pages/supervisor/SupervisorDashboard";
 import AgentDashboard from "@/pages/agent/AgentDashboard";
+import ProjectsPage from "@/pages/supervisor/ProjectsPage";
+import AgentsPage from "@/pages/supervisor/AgentsPage";
+import AuditsPage from "@/pages/supervisor/AuditsPage";
+import SupervisorReportsPage from "@/pages/supervisor/ReportsPage";
+import ScorecardsPage from "@/pages/admin/ScorecardsPage";
+import AdminUsersPage from "@/pages/admin/UsersPage";
+import AdminReportsPage from "@/pages/admin/ReportsPage";
+import MyAuditsPage from "@/pages/agent/MyAuditsPage";
+import AuditDetailPage from "@/pages/agent/AuditDetailPage";
 import { useAuthStore } from "@/features/auth/store/authStore";
 
 /** Send the user to their role's home, or to login if anonymous. */
@@ -49,6 +58,30 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "/admin/users",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <AdminUsersPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/admin/scorecards",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <ScorecardsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/admin/reports",
+        element: (
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <AdminReportsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: "/supervisor",
         element: (
           <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
@@ -57,10 +90,67 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "/supervisor/projects",
+        element: (
+          <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+            <ProjectsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/supervisor/agents",
+        element: (
+          <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+            <AgentsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/supervisor/audits",
+        element: (
+          <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+            <AuditsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/supervisor/reports",
+        element: (
+          <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+            <SupervisorReportsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: "/agent",
         element: (
           <ProtectedRoute allowedRoles={["AGENT"]}>
             <AgentDashboard />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/agent/audits",
+        element: (
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <MyAuditsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/agent/audits/:id",
+        element: (
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <AuditDetailPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        // "My Scores" sidebar entry — same view, score-focused lens.
+        path: "/agent/scores",
+        element: (
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <MyAuditsPage />
           </ProtectedRoute>
         ),
       },

@@ -12,6 +12,10 @@ const config_1 = require("@nestjs/config");
 const prisma_module_1 = require("./prisma/prisma.module");
 const users_module_1 = require("./users/users.module");
 const auth_module_1 = require("./auth/auth.module");
+const projects_module_1 = require("./projects/projects.module");
+const audits_module_1 = require("./audits/audits.module");
+const scorecards_module_1 = require("./scorecards/scorecards.module");
+const agent_audits_module_1 = require("./agent-audits/agent-audits.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -24,6 +28,10 @@ exports.AppModule = AppModule = __decorate([
             prisma_module_1.PrismaModule,
             users_module_1.UsersModule,
             auth_module_1.AuthModule,
+            projects_module_1.ProjectsModule,
+            scorecards_module_1.ScorecardsModule,
+            audits_module_1.AuditsModule,
+            agent_audits_module_1.AgentAuditsModule,
         ],
     })
 ], AppModule);
