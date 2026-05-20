@@ -9,6 +9,7 @@ export class AuthController {
   async login(
     @Body() body: { username: string; password: string }
   ) {
+    console.log("Login request:", body.username);
     return this.authService.login(
       body.username,
       body.password

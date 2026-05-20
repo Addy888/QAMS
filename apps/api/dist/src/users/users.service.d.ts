@@ -1,3 +1,4 @@
+import { OnModuleInit } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import type { CreateUserDto } from "./dto/create-user.dto";
 import { Role } from "../auth/role.enum";
@@ -10,9 +11,10 @@ export type SafeUser = {
     createdAt: Date;
     updatedAt: Date;
 };
-export declare class UsersService {
+export declare class UsersService implements OnModuleInit {
     private prisma;
     constructor(prisma: PrismaService);
+    onModuleInit(): Promise<void>;
     findByUsername(username: string): Promise<{
         id: string;
         username: string;

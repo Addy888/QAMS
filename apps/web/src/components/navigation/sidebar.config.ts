@@ -8,6 +8,7 @@ import {
   Users,
 } from "lucide-react";
 import type { NavGroup, UserRole } from "@/types/navigation";
+import { BrainCircuit } from "lucide-react";
 
 /**
  * Centralized, role-aware sidebar configuration.
@@ -57,6 +58,7 @@ export const SIDEBAR_CONFIG: Record<UserRole, NavGroup[]> = {
       items: [
         { label: "Audits", path: "/supervisor/audits", icon: ClipboardList },
         { label: "Reports", path: "/supervisor/reports", icon: BarChart3 },
+        { label: "Analysis", path: "/supervisor/analysis", icon: BrainCircuit },
       ],
     },
   ],

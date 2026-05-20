@@ -11,9 +11,12 @@ export class AuthService {
   ) {}
 
   async validateUser(username: string, password: string) {
+    console.log("ValidateUser: username =", username, "password =", password);
     const user = await this.usersService.findByUsername(username);
+    console.log("User found in DB:", user);
 
     if (!user) {
+      console.log("User not found in DB!");
       throw new UnauthorizedException("Invalid credentials");
     }
 
@@ -21,6 +24,7 @@ export class AuthService {
       password,
       user.passwordHash
     );
+    console.log("Password match result:", passwordMatch);
 
     if (!passwordMatch) {
       throw new UnauthorizedException("Invalid credentials");

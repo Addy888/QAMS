@@ -616,7 +616,7 @@ export class AuditsService {
         remark: section.remark,
         questions: questions
           .filter((q) => q.sectionId === section.id)
-          .map<AuditQuestionResponse>((q) => {
+          .map((q): AuditQuestionResponse => {
             const ans = answersByQuestion.get(q.id) ?? null;
             return {
               id: q.id,

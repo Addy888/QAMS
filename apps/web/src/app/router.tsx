@@ -10,6 +10,7 @@ import ProjectsPage from "@/pages/supervisor/ProjectsPage";
 import AgentsPage from "@/pages/supervisor/AgentsPage";
 import AuditsPage from "@/pages/supervisor/AuditsPage";
 import SupervisorReportsPage from "@/pages/supervisor/ReportsPage";
+import AnalysisDashboard from "@/pages/supervisor/analysis/AnalysisDashboard";
 import ScorecardsPage from "@/pages/admin/ScorecardsPage";
 import AdminUsersPage from "@/pages/admin/UsersPage";
 import AdminReportsPage from "@/pages/admin/ReportsPage";
@@ -118,6 +119,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
             <SupervisorReportsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/supervisor/analysis",
+        element: (
+          <ProtectedRoute allowedRoles={["SUPERVISOR"]}>
+            <AnalysisDashboard />
           </ProtectedRoute>
         ),
       },

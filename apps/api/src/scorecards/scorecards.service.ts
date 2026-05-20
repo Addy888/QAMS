@@ -108,13 +108,13 @@ export class ScorecardsService {
           _count: { questions: s.questions.length },
         })),
       }),
-      sections: row.sections.map<ScorecardSectionResponse>((s) => ({
+      sections: row.sections.map((s): ScorecardSectionResponse => ({
         id: s.id,
         title: s.title,
         description: s.description,
         weight: s.weight,
         position: s.position,
-        questions: s.questions.map<ScorecardQuestionResponse>((q) => {
+        questions: s.questions.map((q): ScorecardQuestionResponse => {
           const { options, ratingScale } = parseOptions(
             q.type as AuditQuestionType,
             q.optionsJson,

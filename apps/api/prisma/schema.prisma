@@ -434,3 +434,34 @@ model AuditAnswer {
   @@index([questionId])
   @@map("audit_answers")
 }
+
+model Recording {
+  id         String   @id @default(cuid())
+
+  agentId    String
+  audioPath  String
+
+  status       String   @default("Pending") // Pending, Processing, Completed, Failed
+  statusReason String?
+  language     String?
+
+  // AI Analysis results
+  sentiment       String?
+  score           Int?
+  result          String?
+  openingStatus   String?
+  openingDelay    String?
+  openingScore    Int?
+  openingFeedback String?
+  tone            String?
+
+  energyLevel     String?
+  activeListening String?
+  
+  transcription   String?  @db.Text
+  summary         String?  @db.Text
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+}
+

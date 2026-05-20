@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  OnModuleInit,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import * as bcrypt from "bcrypt";
@@ -56,8 +57,32 @@ function toSafeUser(user: {
 }
 
 @Injectable()
-export class UsersService {
+export class UsersService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
+
+  async onModuleInit() {
+    const passwordHash = await bcrypt.hash("12345678", BCRYPT_ROUNDS);
+    const defaultUser = await this.findByUsername("supervisor");
+    if (!defaultUser) {
+      await this.createUser({
+        username: "supervisor",
+        passwordHash,
+        name: "Default Supervisor",
+        role: "ADMIN",
+      });
+      console.log("Seeded default supervisor admin user.");
+    } else {
+      // Force update password and role to ensure it works
+      await this.prisma.user.update({
+        where: { id: defaultUser.id },
+        data: {
+          passwordHash,
+          role: "ADMIN",
+        },
+      });
+      console.log("Updated existing supervisor user with default credentials.");
+    }
+  }
 
   async findByUsername(username: string) {
     return this.prisma.user.findUnique({

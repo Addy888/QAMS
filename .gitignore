@@ -39,3 +39,4 @@ generated/
 
 # vite
 vite.svg
+/generated/prisma

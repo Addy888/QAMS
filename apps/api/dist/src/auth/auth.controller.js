@@ -21,6 +21,7 @@ let AuthController = class AuthController {
         this.authService = authService;
     }
     async login(body) {
+        console.log("Login request:", body.username);
         return this.authService.login(body.username, body.password);
     }
 };

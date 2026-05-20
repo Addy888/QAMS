@@ -55,11 +55,15 @@ let AuthService = class AuthService {
         this.jwtService = jwtService;
     }
     async validateUser(username, password) {
+        console.log("ValidateUser: username =", username, "password =", password);
         const user = await this.usersService.findByUsername(username);
+        console.log("User found in DB:", user);
         if (!user) {
+            console.log("User not found in DB!");
             throw new common_1.UnauthorizedException("Invalid credentials");
         }
         const passwordMatch = await bcrypt.compare(password, user.passwordHash);
+        console.log("Password match result:", passwordMatch);
         if (!passwordMatch) {
             throw new common_1.UnauthorizedException("Invalid credentials");
         }

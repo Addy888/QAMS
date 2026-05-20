@@ -68,6 +68,29 @@ let UsersService = class UsersService {
     constructor(prisma) {
         this.prisma = prisma;
     }
+    async onModuleInit() {
+        const passwordHash = await bcrypt.hash("12345678", BCRYPT_ROUNDS);
+        const defaultUser = await this.findByUsername("supervisor");
+        if (!defaultUser) {
+            await this.createUser({
+                username: "supervisor",
+                passwordHash,
+                name: "Default Supervisor",
+                role: "ADMIN",
+            });
+            console.log("Seeded default supervisor admin user.");
+        }
+        else {
+            await this.prisma.user.update({
+                where: { id: defaultUser.id },
+                data: {
+                    passwordHash,
+                    role: "ADMIN",
+                },
+            });
+            console.log("Updated existing supervisor user with default credentials.");
+        }
+    }
     async findByUsername(username) {
         return this.prisma.user.findUnique({
             where: { username },
