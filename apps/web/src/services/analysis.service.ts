@@ -10,7 +10,7 @@ export interface AnalysisRecord {
   coachingFeedback?: string | null;
   summary?: string | null;
   transcription?: string | null;
-  status: "Pending" | "Processing" | "Completed" | "Failed" | "Retrying" | "Uploading" | "Processing Audio" | "Generating Transcript" | "Detecting Language" | "Running AI Analysis" | "Saving Results";
+  status: "Pending" | "Processing" | "Completed" | "Failed" | "Retrying" | "Uploading" | "Processing Audio" | "Generating Transcript" | "Detecting Language" | "Running AI Analysis" | "Saving Results" | "Transcribing" | "Timeout";
   language?: string | null;
   statusReason?: string | null;
   createdAt: string;

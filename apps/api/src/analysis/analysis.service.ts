@@ -1,25 +1,118 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { TranscriptionService } from "../transcription/transcription.service";
 import { OllamaAnalysisService } from "./ollama-analysis.service";
 import axios from "axios";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 
 @Injectable()
-export class AnalysisService {
+export class AnalysisService implements OnModuleInit {
   private readonly logger = new Logger(AnalysisService.name);
 
-  // STEP 1 — CREATE AI JOB QUEUE
+  // Queue state variables
   private queue: string[] = [];
   private activeJobs = 0;
-  private readonly maxConcurrency = 3; // STEP 2 — LIMIT CONCURRENT AI REQUESTS
+  
+  // Job start times mapping (recordingId -> start epoch in ms)
+  private jobStartTimes = new Map<string, number>();
+  // Job attempt tracking (recordingId -> count of attempts)
+  private jobAttempts = new Map<string, number>();
+
+  // System warning interval timer
+  private staleJobInterval: any = null;
 
   constructor(
     private prisma: PrismaService,
     private transcriptionService: TranscriptionService,
     private ollamaAnalysisService: OllamaAnalysisService
   ) {}
+
+  async onModuleInit() {
+    this.logger.log("[Queue] Initializing AnalysisService Queue and clearing stale states...");
+    try {
+      const staleRecordings = await this.prisma.recording.findMany({
+        where: {
+          status: {
+            in: ["Pending", "Transcribing", "Detecting Language", "Running AI Analysis", "Saving Results", "Uploading", "Retrying"]
+          }
+        }
+      });
+
+      if (staleRecordings.length > 0) {
+        this.logger.log(`[Queue] Found ${staleRecordings.length} stale recordings in database. Resetting to Pending for retry...`);
+        for (const rec of staleRecordings) {
+          await this.prisma.recording.update({
+            where: { id: rec.id },
+            data: {
+              status: "Pending",
+              statusReason: "Server restarted. Resetting state to Pending for retry...",
+            }
+          });
+          // Auto-enqueue them!
+          this.enqueueJob(rec.id);
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`[Queue] Failed to clear stale states on startup: ${error.message}`);
+    }
+
+    // Start background monitor for stalled jobs
+    if (!this.staleJobInterval) {
+      this.staleJobInterval = setInterval(() => this.monitorStalledJobs(), 15000);
+      if (this.staleJobInterval && typeof this.staleJobInterval.unref === 'function') {
+        this.staleJobInterval.unref();
+      }
+    }
+  }
+
+  private async monitorStalledJobs() {
+    const now = Date.now();
+    const workerTimeout = Number(process.env.WORKER_TIMEOUT_MS) || 180000; // 3 minutes
+
+    for (const [id, startedAt] of this.jobStartTimes.entries()) {
+      if (now - startedAt > workerTimeout) {
+        this.logger.error(`[Queue] Job ${id} has stalled (running for ${Math.round((now - startedAt) / 1000)}s). Forcing timeout/failure...`);
+        
+        // Remove from trackers
+        this.jobStartTimes.delete(id);
+        
+        // Decrement active jobs count
+        this.activeJobs = Math.max(0, this.activeJobs - 1);
+
+        try {
+          await this.prisma.recording.update({
+            where: { id },
+            data: {
+              status: "Timeout",
+              statusReason: `Analysis timed out after exceeding the ${workerTimeout / 1000}s limit.`,
+            },
+          });
+          this.logger.log(`[Queue] Stalled recording ${id} marked as TIMEOUT.`);
+        } catch (err: any) {
+          this.logger.error(`Failed to update stalled job status in DB: ${err.message}`);
+        }
+
+        // Process queue again to unjam
+        this.processQueue();
+      }
+    }
+  }
+
+  private checkSystemResources() {
+    try {
+      const freeMem = os.freemem();
+      const totalMem = os.totalmem();
+      const usedMem = totalMem - freeMem;
+      const memUsagePercent = (usedMem / totalMem) * 100;
+      if (memUsagePercent > 85) {
+        this.logger.warn(`[System Warning] High memory usage detected: ${memUsagePercent.toFixed(1)}% (${Math.round(usedMem / 1024 / 1024)}MB / ${Math.round(totalMem / 1024 / 1024)}MB)`);
+      }
+    } catch (err: any) {
+      this.logger.error(`Failed to retrieve system memory info: ${err.message}`);
+    }
+  }
 
   async getAllRecordings() {
     return this.getAnalysisRecordings();
@@ -53,8 +146,6 @@ export class AnalysisService {
       },
     });
   }
-
-
 
   // STEP 8 — ADD BACKGROUND WORKER (Triggered instantly in background)
   async analyzeRecording(id: string) {
@@ -93,7 +184,11 @@ export class AnalysisService {
   }
 
   private async processQueue() {
-    if (this.activeJobs >= this.maxConcurrency || this.queue.length === 0) {
+    const maxConcurrency = Number(process.env.MAX_CONCURRENT_ANALYSIS || 1);
+
+    this.logger.log(`[Queue] Status: pending=${this.queue.length} active=${this.activeJobs} maxConcurrency=${maxConcurrency}`);
+
+    if (this.activeJobs >= maxConcurrency || this.queue.length === 0) {
       return;
     }
 
@@ -101,12 +196,15 @@ export class AnalysisService {
     if (!id) return;
 
     this.activeJobs++;
+    this.jobStartTimes.set(id, Date.now());
+    this.checkSystemResources();
     
     this.executeAnalysisJob(id)
       .catch((err) => {
         this.logger.error(`Error in queue worker processing recording ${id}: ${err.message}`);
       })
       .finally(() => {
+        this.jobStartTimes.delete(id);
         this.activeJobs--;
         this.processQueue(); // Loop recursion
       });
@@ -133,18 +231,19 @@ export class AnalysisService {
         throw new Error(`Audio file not found at path: ${recording.audioPath}`);
       }
 
-      this.logger.log(`[STT] Started transcription for recording ${id}`);
+      const transcriptionStart = Date.now();
+      this.logger.log(`[STT][${id}] Started transcription`);
 
-      // 2. Update status to Transcribing
       await this.prisma.recording.update({
         where: { id },
         data: {
           status: "Transcribing",
-          statusReason: "Converting speech to text...",
+          statusReason: "Converting speech to text locally...",
         },
       });
 
       let rawTranscript = "";
+      let detectedLanguage = "";
       let transcribeErrorOccurred: any = null;
       const transcribeRetryDelays = [2000, 5000, 10000];
 
@@ -152,7 +251,7 @@ export class AnalysisService {
       for (let attempt = 0; attempt <= 2; attempt++) {
         try {
           if (attempt > 0) {
-            this.logger.warn(`[STT] Retrying transcription for recording ${id} (Attempt ${attempt}/2)...`);
+            this.logger.warn(`[STT][${id}] Retrying transcription (Attempt ${attempt}/2)...`);
             await this.prisma.recording.update({
               where: { id },
               data: {
@@ -166,12 +265,13 @@ export class AnalysisService {
 
           const transcriptionResult = await this.transcriptionService.transcribeAudio(recording.audioPath, id);
           rawTranscript = transcriptionResult.transcript;
+          detectedLanguage = transcriptionResult.detectedLanguageCode || "";
           if (rawTranscript && rawTranscript.trim() !== "") {
             transcribeErrorOccurred = null;
             break;
           }
         } catch (err: any) {
-          this.logger.error(`[STT] Transcription attempt ${attempt} failed: ${err.message}`);
+          this.logger.error(`[STT][${id}] Transcription attempt ${attempt} failed: ${err.message}`);
           transcribeErrorOccurred = err;
         }
       }
@@ -181,24 +281,53 @@ export class AnalysisService {
         throw new Error("Transcription unavailable. AI analysis could not be completed.");
       }
 
-      this.logger.log(`[STT] Transcription completed successfully. Length: ${rawTranscript.length}`);
+      const transcriptionDuration = Date.now() - transcriptionStart;
+      this.logger.log(`[STT][${id}] Transcription completed successfully in ${transcriptionDuration}ms. Length: ${rawTranscript.length}`);
 
-      // 3. Save transcript and update status to Running AI Analysis
+      // 2. Set to Detecting Language state
+      await this.prisma.recording.update({
+        where: { id },
+        data: {
+          status: "Detecting Language",
+          statusReason: "Analyzing speech language and characteristics...",
+        },
+      });
+
+      // Simple language name detection from code (standard languages support)
+      let resolvedLanguage = "English";
+      if (detectedLanguage === "hi") resolvedLanguage = "Hindi";
+      else if (detectedLanguage === "mr") resolvedLanguage = "Marathi";
+      else if (detectedLanguage === "en") resolvedLanguage = "English";
+      else if (detectedLanguage) resolvedLanguage = detectedLanguage;
+
+      // 3. Set to Running AI Analysis state
       await this.prisma.recording.update({
         where: { id },
         data: {
           transcription: rawTranscript.trim(),
+          language: resolvedLanguage,
           status: "Running AI Analysis",
-          statusReason: "AI is generating call quality insights...",
+          statusReason: "Ollama generating quality scoring and feedback...",
         },
       });
 
-      console.log("SAVED TRANSCRIPT TO DATABASE:", rawTranscript.substring(0, 100) + "...");
+      this.logger.log(`[AI][${id}] Starting Ollama analysis with model: ${process.env.OLLAMA_MODEL || 'phi3:mini'}`);
+      const aiStart = Date.now();
 
       // 4. Run AI Analysis via local Ollama Service
       const parsedResult = await this.ollamaAnalysisService.analyzeTranscript(rawTranscript.trim());
+      const aiDuration = Date.now() - aiStart;
+      this.logger.log(`[AI][${id}] Ollama analysis completed in ${aiDuration}ms`);
 
-      console.log('STEP 6 UPDATE DATABASE (SAVING RESULTS IMMEDIATELY)');
+      // 5. Set to Saving Results state
+      await this.prisma.recording.update({
+        where: { id },
+        data: {
+          status: "Saving Results",
+          statusReason: "Persisting final scores and reports to database...",
+        },
+      });
+
       const truncate = (str: any, len: number) => String(str || '').substring(0, len);
 
       await this.prisma.recording.update({
@@ -213,31 +342,57 @@ export class AnalysisService {
           status: 'Completed', 
           statusReason: 'AI Analysis completed successfully',
           summary: truncate(parsedResult.summary, 1000),
-          language: truncate(parsedResult.language, 191),
+          language: truncate(parsedResult.language || resolvedLanguage, 191),
           coachingFeedback: truncate(parsedResult.coachingFeedback, 1000)
         } as any,
       });
 
-      console.log(`[Ollama] AI analysis completed`);
-      console.log(`JOB ${id} COMPLETED SUCCESSFULLY!`);
+      const totalDuration = Date.now() - transcriptionStart;
+      this.logger.log(`[Queue][${id}] Job completed successfully in ${totalDuration}ms (STT: ${transcriptionDuration}ms, AI: ${aiDuration}ms).`);
+      
+      // Clear attempt count on success
+      this.jobAttempts.delete(id);
 
     } catch (error: any) {
-      console.log('REAL AI ANALYSIS FAILED — NO MANUAL FALLBACKS ALLOWED');
-      console.log(error);
+      const isTimeout = error.code === 'ECONNABORTED' || error.message?.toLowerCase().includes('timeout');
+      const attempts = (this.jobAttempts.get(id) || 0) + 1;
+      this.jobAttempts.set(id, attempts);
+      const maxRetries = Number(process.env.MAX_RETRIES || 3);
 
-      const truncate = (str: any, len: number) => String(str || '').substring(0, len);
+      this.logger.error(`[Queue][${id}] Job failed (Attempt ${attempts}/${maxRetries}): ${error.message}`);
 
-      try {
+      if (attempts < maxRetries) {
+        const nextAttempt = attempts + 1;
         await this.prisma.recording.update({
           where: { id },
           data: {
-            status: 'Failed',
-            statusReason: truncate(`${error.message || 'Unknown error'}`, 190),
+            status: "Retrying",
+            statusReason: `Failed: ${error.message || 'Error'}. Retrying (Attempt ${nextAttempt}/${maxRetries})...`,
           },
         });
-        console.log(`RECORDING ${id} MARKED AS FAILED.`);
-      } catch (dbError) {
-        console.error('CRITICAL: DB update failed in error catch block:', dbError);
+        
+        // Re-enqueue after 5s delay
+        setTimeout(() => {
+          this.logger.log(`[Queue][${id}] Re-queuing failed job (Attempt ${nextAttempt})...`);
+          this.enqueueJob(id);
+        }, 5000);
+      } else {
+        const status = isTimeout ? 'Timeout' : 'Failed';
+        const statusReason = isTimeout ? 'AI analysis timed out (Ollama exceeded 60s limit).' : error.message;
+        const truncate = (str: any, len: number) => String(str || '').substring(0, len);
+
+        try {
+          await this.prisma.recording.update({
+            where: { id },
+            data: {
+              status,
+              statusReason: truncate(statusReason, 190),
+            },
+          });
+          this.logger.log(`[Queue][${id}] Marked as ${status.toUpperCase()} permanently after ${attempts} attempts.`);
+        } catch (dbError) {
+          this.logger.error(`[Queue][${id}] CRITICAL: DB update failed in catch block: ${dbError}`);
+        }
       }
     }
   }
@@ -402,15 +557,23 @@ export class AnalysisService {
       },
     });
 
+    const processSingleCallOnly = process.env.PROCESS_SINGLE_CALL_ONLY === "true";
+    let recordsToEnqueue = pendingOrFailed;
+
+    if (processSingleCallOnly && pendingOrFailed.length > 0) {
+      this.logger.warn(`[Queue] PROCESS_SINGLE_CALL_ONLY is enabled. Enqueuing only the first recording out of ${pendingOrFailed.length} pending/failed ones.`);
+      recordsToEnqueue = [pendingOrFailed[0]];
+    }
+
     // Enqueue each
-    for (const rec of pendingOrFailed) {
+    for (const rec of recordsToEnqueue) {
       this.enqueueJob(rec.id);
     }
 
     return {
       success: true,
-      message: `Data sync complete. Enqueued ${pendingOrFailed.length} recordings for AI analysis.`,
-      count: pendingOrFailed.length,
+      message: `Data sync complete. Enqueued ${recordsToEnqueue.length} recordings for AI analysis.`,
+      count: recordsToEnqueue.length,
     };
   }
 

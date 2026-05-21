@@ -254,12 +254,12 @@ const AnalysisTable = ({
               {data
                 ?.filter((item) => item?.id)
                 .map((item) => {
-                  const isInProgress = !["Completed", "Failed"].includes(
+                  const isInProgress = !["Completed", "Failed", "Timeout"].includes(
                     item.status || "",
                   );
                   const displayField = (
                     value: string | null | undefined,
-                    processingFallback = "Processing...",
+                    processingFallback = item.status || "Processing...",
                   ) => {
                     if (value) return value;
                     if (isInProgress) return processingFallback;
@@ -287,7 +287,7 @@ const AnalysisTable = ({
                                 : "border-border bg-bg-muted text-fg-subtle",
                           )}
                         >
-                          {item.language || (isInProgress ? "Detecting..." : "—")}
+                          {item.language || (isInProgress ? item.status || "Detecting..." : "—")}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -324,7 +324,7 @@ const AnalysisTable = ({
                                 : "text-fg-subtle",
                             )}
                           >
-                            {isInProgress ? "Calculating..." : "—"}
+                            {isInProgress ? item.status || "Calculating..." : "—"}
                           </span>
                         )}
                       </td>

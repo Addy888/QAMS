@@ -20,6 +20,7 @@ export class OllamaAnalysisService {
   async analyzeTranscript(transcript: string): Promise<AIAnalysisResult> {
     const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
     const ollamaModel = process.env.OLLAMA_MODEL || "llama3";
+    const ollamaTimeout = Number(process.env.OLLAMA_TIMEOUT_MS) || 60000;
 
     const prompt = `You are analyzing real Indian customer support conversations.
 The conversation may contain Hindi, Marathi, Hinglish, or mixed-language speech.
@@ -41,8 +42,9 @@ Return ONLY valid JSON matching this exact structure:
 Transcript:
 ${transcript}`;
 
+    const startTime = Date.now();
     try {
-      this.logger.log(`Calling Ollama API at ${ollamaUrl} with model ${ollamaModel}...`);
+      this.logger.log(`Calling Ollama API at ${ollamaUrl} with model ${ollamaModel} (timeout: ${ollamaTimeout}ms)...`);
       const response = await axios.post(
         `${ollamaUrl}/api/generate`,
         {
@@ -55,13 +57,21 @@ ${transcript}`;
             num_predict: 800,
           },
         },
-        { timeout: 120000 }
+        { timeout: ollamaTimeout }
       );
+
+      const durationMs = Date.now() - startTime;
+      this.logger.log(`Ollama API response received in ${durationMs}ms`);
 
       const raw = response.data?.response || "";
       return this.parseJSONSafely(raw, transcript);
     } catch (error: any) {
-      this.logger.error(`Ollama Analysis failed: ${error.message}`);
+      const durationMs = Date.now() - startTime;
+      if (error.code === "ECONNABORTED" || error.message?.toLowerCase().includes("timeout")) {
+        this.logger.error(`Ollama API request timed out after ${durationMs}ms`);
+        throw new Error(`Ollama API request timed out after ${ollamaTimeout}ms.`);
+      }
+      this.logger.error(`Ollama Analysis failed after ${durationMs}ms: ${error.message}`);
       throw error;
     }
   }

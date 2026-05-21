@@ -16,11 +16,11 @@ const AnalysisDetailsModal = ({
 }: AnalysisDetailsModalProps) => {
   if (!record) return null;
 
-  const isInProgress = !["Completed", "Failed"].includes(record.status || "");
+  const isInProgress = !["Completed", "Failed", "Timeout"].includes(record.status || "");
 
   const safeValue = (
     value: string | null | undefined,
-    processingFallback = "Processing...",
+    processingFallback = record.status || "Processing...",
   ) => {
     if (value) return value;
     if (isInProgress) return processingFallback;
@@ -123,6 +123,18 @@ const AnalysisDetailsModal = ({
                   </div>
                   <p className="text-sm leading-relaxed text-fg">
                     {record.statusReason || "The backend did not return an error message."}
+                  </p>
+                </div>
+              )}
+
+              {record.status === "Timeout" && (
+                <div className="rounded-xl border border-danger/20 bg-danger/5 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-danger">
+                    <AlertTriangle className="h-5 w-5" />
+                    <h4 className="font-bold">Analysis Timeout</h4>
+                  </div>
+                  <p className="text-sm leading-relaxed text-fg">
+                    {record.statusReason || "The AI analysis job exceeded the maximum timeout limit."}
                   </p>
                 </div>
               )}

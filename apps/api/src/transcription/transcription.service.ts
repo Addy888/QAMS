@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import { resolveApiPath, resolveAudioPath } from "../analysis/runtime-paths";
 
 export interface LocalTranscriptionResult {
@@ -75,10 +76,26 @@ export class TranscriptionService {
       args.push("--model-cache-dir", runtime.modelCacheDir);
     }
 
+    // Log system memory info before starting the transcription process
+    try {
+      const freeMem = os.freemem();
+      const totalMem = os.totalmem();
+      const usedMem = totalMem - freeMem;
+      const memUsagePercent = (usedMem / totalMem) * 100;
+      this.logger.log(`[Transcription][${recordingId}] System memory state before spawning: ${memUsagePercent.toFixed(1)}% used (${Math.round(usedMem / 1024 / 1024)}MB / ${Math.round(totalMem / 1024 / 1024)}MB)`);
+      if (memUsagePercent > 85) {
+        this.logger.warn(`[Transcription][${recordingId}] High memory usage warning: ${memUsagePercent.toFixed(1)}% used. This might slow down Whisper execution.`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`Unable to check system memory info before transcription: ${err.message}`);
+    }
+
     const startedAt = Date.now();
+    const timeoutMs = Number(process.env.TRANSCRIPTION_TIMEOUT_MS) || 120000;
     const { stdout, stderr, exitCode } = await this.runPythonProcess(
       runtime.pythonBin,
       args,
+      timeoutMs,
     );
     const durationMs = Date.now() - startedAt;
 
@@ -145,7 +162,7 @@ export class TranscriptionService {
   private getRuntimeConfig(): LocalRuntimeConfig {
     return {
       pythonBin: process.env.LOCAL_PYTHON_BIN?.trim() || "python",
-      model: process.env.FASTER_WHISPER_MODEL?.trim() || "small",
+      model: process.env.FASTER_WHISPER_MODEL?.trim() || "base",
       device: process.env.FASTER_WHISPER_DEVICE?.trim() || "cpu",
       computeType:
         process.env.FASTER_WHISPER_COMPUTE_TYPE?.trim() || "int8",
@@ -175,7 +192,7 @@ export class TranscriptionService {
     return candidates[0];
   }
 
-  private runPythonProcess(pythonBin: string, args: string[]) {
+  private runPythonProcess(pythonBin: string, args: string[], timeoutMs: number) {
     return new Promise<{
       stdout: string;
       stderr: string;
@@ -188,6 +205,13 @@ export class TranscriptionService {
 
       let stdout = "";
       let stderr = "";
+      let isTimedOut = false;
+
+      const timer = setTimeout(() => {
+        isTimedOut = true;
+        this.logger.error(`[Transcription] Subprocess exceeded timeout of ${timeoutMs}ms. Killing process...`);
+        child.kill("SIGKILL");
+      }, timeoutMs);
 
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
@@ -199,6 +223,7 @@ export class TranscriptionService {
       });
 
       child.on("error", (error) => {
+        clearTimeout(timer);
         reject(
           new Error(
             `Unable to start Python transcription worker using '${pythonBin}': ${error.message}`,
@@ -207,11 +232,16 @@ export class TranscriptionService {
       });
 
       child.on("close", (exitCode) => {
-        resolve({
-          stdout: stdout.trim(),
-          stderr: stderr.trim(),
-          exitCode,
-        });
+        clearTimeout(timer);
+        if (isTimedOut) {
+          reject(new Error(`Transcription process timed out after ${timeoutMs}ms.`));
+        } else {
+          resolve({
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+            exitCode,
+          });
+        }
       });
     });
   }

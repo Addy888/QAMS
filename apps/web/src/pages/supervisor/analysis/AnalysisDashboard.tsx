@@ -165,6 +165,7 @@ const AnalysisDashboard = () => {
       r.status === "Processing" || 
       r.status === "Retrying" ||
       r.status === "Uploading" ||
+      r.status === "Transcribing" ||
       r.status === "Processing Audio" ||
       r.status === "Generating Transcript" ||
       r.status === "Detecting Language" ||
