@@ -167,7 +167,9 @@ const AnalysisDashboard = () => {
       r.status === "Uploading" ||
       r.status === "Processing Audio" ||
       r.status === "Generating Transcript" ||
-      r.status === "Running AI Analysis"
+      r.status === "Detecting Language" ||
+      r.status === "Running AI Analysis" ||
+      r.status === "Saving Results"
     );
 
     if (hasActiveJobs) {

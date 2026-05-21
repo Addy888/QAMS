@@ -18,6 +18,20 @@ export class RecordingScannerService {
     private readonly analysisService: AnalysisService,
   ) {}
 
+  private deriveAgentId(audioPath: string) {
+    const fileName = path.basename(audioPath, path.extname(audioPath));
+    const segments = fileName.split("_").filter(Boolean);
+    const likelyAgent = segments.find((segment) =>
+      /^(FCS|AGENT|EMP|USR)[A-Za-z0-9-]+$/i.test(segment.replace(/-all$/i, "")),
+    );
+
+    if (likelyAgent) {
+      return likelyAgent.replace(/-all$/i, "");
+    }
+
+    return "UNASSIGNED";
+  }
+
   @Cron('*/30 * * * * *') // Run every 30 seconds
   async scanRecordings() {
     if (this.isScanning) {
@@ -64,9 +78,10 @@ export class RecordingScannerService {
         // INSERT
         const newRecording = await this.prisma.recording.create({
           data: {
-            agentId: `AGENT-TEST-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
+            agentId: this.deriveAgentId(audioPath),
             audioPath,
             status: 'Pending',
+            statusReason: 'Discovered on disk. Queued for transcription...',
           },
         });
 

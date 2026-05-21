@@ -1,11 +1,11 @@
 import { useState } from "react";
+import { FileText, Play, RefreshCw, Download, BookOpen } from "lucide-react";
+import { toast } from "sonner";
+
 import StatusBadge from "./StatusBadge";
 import AnalysisDetailsModal from "./AnalysisDetailsModal";
-import { FileText, Play, RefreshCw, Download, BookOpen } from "lucide-react";
-
 import { cn } from "@/lib/utils";
 import { analyzeRecording, type AnalysisRecord } from "@/services/analysis.service";
-import { toast } from "sonner";
 import { getApiBaseUrl } from "@/services/api";
 
 interface AnalysisTableProps {
@@ -14,8 +14,14 @@ interface AnalysisTableProps {
   onRefetch?: () => void;
 }
 
-const AnalysisTable = ({ data, onUpdateRecord, onRefetch }: AnalysisTableProps) => {
-  const [selectedRecord, setSelectedRecord] = useState<AnalysisRecord | null>(null);
+const AnalysisTable = ({
+  data,
+  onUpdateRecord,
+  onRefetch,
+}: AnalysisTableProps) => {
+  const [selectedRecord, setSelectedRecord] = useState<AnalysisRecord | null>(
+    null,
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
@@ -25,38 +31,46 @@ const AnalysisTable = ({ data, onUpdateRecord, onRefetch }: AnalysisTableProps) 
   };
 
   const handleAnalyze = async (id: string) => {
-    const currentRecord = data.find(r => r.id === id);
+    const currentRecord = data.find((row) => row.id === id);
     if (!currentRecord) return;
 
     setAnalyzingId(id);
-
-    // Optimistic UI — show Processing immediately
     onUpdateRecord({
       ...currentRecord,
-      status: 'Processing',
-      statusReason: 'AI is analyzing the call…',
+      status: "Pending",
+      statusReason: "Queued for real production AI analysis...",
     });
 
-    const toastId = toast.loading('AI is analyzing call… this may take up to 90 seconds.');
+    const toastId = toast.loading(
+      "AI analysis has been queued. The transcript and scoring pipeline are starting now.",
+    );
 
     try {
-      // Trigger background analysis and update UI state
       const result = await analyzeRecording(id);
-      onUpdateRecord(result);
-      toast.success('AI analysis completed successfully!', { id: toastId });
-      
-      // Auto-refetch the dashboard to update stats and list
+      if (result) {
+        onUpdateRecord(result);
+      }
+
+      toast.success("AI analysis queued successfully.", { id: toastId });
+
       if (onRefetch) {
         await onRefetch();
       }
-      window.dispatchEvent(new CustomEvent('refetch-analysis'));
-    } catch (error) {
-      console.error('Analysis failed:', error);
-      toast.error('AI Analysis failed to start — check backend logs.', { id: toastId });
+      window.dispatchEvent(new CustomEvent("refetch-analysis"));
+    } catch (error: any) {
+      const backendError =
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Unknown backend error";
+
+      console.error("Analysis failed:", error);
+      toast.error(backendError, { id: toastId });
+
       onUpdateRecord({
         ...currentRecord,
-        status: 'Failed',
-        statusReason: 'Client-side error starting analysis',
+        status: "Failed",
+        statusReason: backendError,
       });
     } finally {
       setAnalyzingId(null);
@@ -64,16 +78,14 @@ const AnalysisTable = ({ data, onUpdateRecord, onRefetch }: AnalysisTableProps) 
   };
 
   const handleReanalyze = async (id: string) => {
-    const currentRecord = data.find(r => r.id === id);
+    const currentRecord = data.find((row) => row.id === id);
     if (!currentRecord) return;
 
     setAnalyzingId(id);
-
-    // Optimistic UI state reset
     onUpdateRecord({
       ...currentRecord,
-      status: 'Pending',
-      statusReason: 'Re-queued for fresh AI analysis...',
+      status: "Pending",
+      statusReason: "Re-queued for fresh AI analysis...",
       sentiment: null,
       score: null,
       openingStatus: null,
@@ -81,99 +93,117 @@ const AnalysisTable = ({ data, onUpdateRecord, onRefetch }: AnalysisTableProps) 
       energyLevel: null,
       activeListening: null,
       summary: null,
+      coachingFeedback: null,
+      result: null,
     });
 
-    const toastId = toast.loading('Re-queuing call for fresh AI analysis...');
+    const toastId = toast.loading(
+      "Re-queuing this call for fresh AI analysis...",
+    );
 
     try {
       const response = await fetch(`${getApiBaseUrl()}/analysis/reanalyze/${id}`, {
         method: "POST",
       });
-      if (!response.ok) throw new Error("Reanalysis trigger failed");
-      const result = await response.json();
-      
-      if (result.success && result.analysis) {
-        onUpdateRecord(result.analysis);
-        toast.success('Reanalysis job successfully queued!', { id: toastId });
-      } else {
-        throw new Error(result.error || "Failed to start reanalysis");
+
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(
+          result?.error || result?.message || "Failed to start reanalysis",
+        );
       }
-      
+
+      if (result.analysis) {
+        onUpdateRecord(result.analysis);
+      }
+
+      toast.success("Reanalysis job successfully queued.", { id: toastId });
+
       if (onRefetch) {
         await onRefetch();
       }
-      window.dispatchEvent(new CustomEvent('refetch-analysis'));
+      window.dispatchEvent(new CustomEvent("refetch-analysis"));
     } catch (error: any) {
-      console.error('Reanalysis failed:', error);
-      toast.error(error.message || 'Failed to start fresh AI analysis.', { id: toastId });
-      onUpdateRecord(currentRecord); // restore old state
+      console.error("Reanalysis failed:", error);
+      toast.error(error.message || "Failed to start reanalysis.", {
+        id: toastId,
+      });
+      onUpdateRecord(currentRecord);
     } finally {
       setAnalyzingId(null);
     }
   };
 
-  const handleDownloadTranscript = (item: AnalysisRecord) => {
-    if (!item.transcription) {
-      toast.error("No transcription available for this call recording.");
+  const handleDownloadTranscript = (record: AnalysisRecord) => {
+    if (!record.transcription) {
+      toast.error("No transcription is available for this call.");
       return;
     }
 
-    const blob = new Blob([
-      `QAMS AI CALL TRANSCRIPTION REPORT\n`,
-      `=================================\n`,
-      `Record ID: ${item.id}\n`,
-      `Agent ID: ${item.agentId || '—'}\n`,
-      `AI Score: ${item.score !== null ? item.score + '%' : '—'}\n`,
-      `Sentiment: ${item.sentiment || '—'}\n`,
-      `Created At: ${item.createdAt}\n`,
-      `=================================\n\n`,
-      `${item.transcription}`
-    ], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob(
+      [
+        "QAMS AI CALL TRANSCRIPTION REPORT\n",
+        "=================================\n",
+        `Record ID: ${record.id}\n`,
+        `Agent ID: ${record.agentId || "—"}\n`,
+        `Language: ${record.language || "—"}\n`,
+        `AI Score: ${record.score !== null ? `${record.score}%` : "—"}\n`,
+        `Sentiment: ${record.sentiment || "—"}\n`,
+        `Created At: ${record.createdAt}\n`,
+        "=================================\n\n",
+        record.transcription,
+      ],
+      { type: "text/plain;charset=utf-8" },
+    );
 
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `call_transcript_${item.id}.txt`);
+    link.setAttribute("download", `call_transcript_${record.id}.txt`);
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    toast.success("Transcript downloaded successfully!");
+    toast.success("Transcript downloaded successfully.");
   };
 
-  const handleOpenFullAIReport = async (item: AnalysisRecord) => {
-    const toastId = toast.loading(`Generating full AI PDF report for Call #${item.id}...`);
+  const handleOpenFullAIReport = async (record: AnalysisRecord) => {
+    const toastId = toast.loading(
+      `Generating full AI PDF report for Call #${record.id}...`,
+    );
+
     try {
-      const url = `${getApiBaseUrl()}/analysis/export?format=pdf&search=${item.id}`;
+      const url = `${getApiBaseUrl()}/analysis/export?format=pdf&search=${record.id}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to generate PDF report");
-      
+
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.setAttribute("download", `ai_report_${item.id}.pdf`);
+      link.setAttribute("download", `ai_report_${record.id}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(downloadUrl);
-      
-      toast.success("Full AI Report downloaded successfully!", { id: toastId });
+
+      toast.success("Full AI report downloaded successfully.", { id: toastId });
     } catch (error) {
       console.error("Failed to generate AI report:", error);
-      toast.error("Failed to download full AI PDF report.", { id: toastId });
+      toast.error("Failed to download the full AI PDF report.", {
+        id: toastId,
+      });
     }
   };
 
   const formatDate = (dateString: string) => {
     try {
-      const date = new Date(dateString);
       return new Intl.DateTimeFormat("en-GB", {
         day: "2-digit",
         month: "short",
         year: "numeric",
-      }).format(date);
-    } catch (e) {
+      }).format(new Date(dateString));
+    } catch {
       return dateString;
     }
   };
@@ -182,143 +212,254 @@ const AnalysisTable = ({ data, onUpdateRecord, onRefetch }: AnalysisTableProps) 
     <>
       <div className="w-full overflow-hidden rounded-xl border border-border bg-surface shadow-elev-1">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-border bg-bg-muted/50">
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">Agent Name</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">Language</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">Sentiment</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">Score</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">Opening Status</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">Tone</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">Energy Level</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">Active Listening</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">Status</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">Created Date</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle text-right">Actions</th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">
+                  Agent Name
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                  Language
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                  Sentiment
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                  Score
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">
+                  Opening Status
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                  Tone
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">
+                  Energy Level
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">
+                  Active Listening
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                  Status
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">
+                  Created Date
+                </th>
+                <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-fg-subtle whitespace-nowrap">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {data?.map((item) => (
-                <tr key={item.id} className="hover:bg-bg-muted/30 transition-colors group">
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col">
-                      <span className="text-sm font-bold text-fg">{item.agentId}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-accent/15 text-accent border border-accent/20">
-                      {item.language || "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm text-fg max-w-[150px] truncate block" title={item.sentiment || ""}>
-                      {item.sentiment || "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={cn(
-                       "text-sm font-bold",
-                       (item.score ?? 0) >= 80 ? "text-success" : (item.score ?? 0) >= 60 ? "text-warning" : "text-danger"
-                    )}>
-                        {item.score !== null ? `${item.score}%` : "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm text-fg max-w-[150px] truncate block" title={item.openingStatus || ""}>
-                      {item.openingStatus || "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm text-fg max-w-[150px] truncate block" title={item.tone || ""}>
-                      {item.tone || "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm text-fg max-w-[150px] truncate block" title={item.energyLevel || ""}>
-                      {item.energyLevel || "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm text-fg max-w-[150px] truncate block" title={item.activeListening || ""}>
-                      {item.activeListening || "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col gap-1">
-                      <StatusBadge status={item.status === "Pending" && analyzingId === item.id ? "Processing" : item.status} />
-                      <span className="text-[10px] text-fg-subtle italic max-w-[120px] leading-tight">
-                        {item.statusReason || (item.status === "Pending" ? "Waiting for analysis" : "")}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm text-fg-subtle whitespace-nowrap">{formatDate(item.createdAt)}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
-                      {/* View Details */}
-                      <button 
-                        onClick={() => handleViewDetails(item)}
-                        className="p-1.5 rounded-md hover:bg-bg-muted text-fg-subtle hover:text-accent transition-all" 
-                        title="View Details"
-                      >
-                        <FileText className="h-4 w-4" />
-                      </button>
+              {data
+                ?.filter((item) => item?.id)
+                .map((item) => {
+                  const isInProgress = !["Completed", "Failed"].includes(
+                    item.status || "",
+                  );
+                  const displayField = (
+                    value: string | null | undefined,
+                    processingFallback = "Processing...",
+                  ) => {
+                    if (value) return value;
+                    if (isInProgress) return processingFallback;
+                    return "—";
+                  };
 
-                      {/* Reanalyze Call */}
-                      <button 
-                        onClick={() => handleReanalyze(item.id)}
-                        disabled={analyzingId === item.id || item.status === "Processing"}
-                        className="p-1.5 rounded-md hover:bg-bg-muted text-fg-subtle hover:text-accent transition-all disabled:opacity-30" 
-                        title="Reanalyze Call"
-                      >
-                        <RefreshCw className={cn("h-4 w-4", analyzingId === item.id && "animate-spin")} />
-                      </button>
-
-                      {/* Download Transcript */}
-                      <button 
-                        onClick={() => handleDownloadTranscript(item)}
-                        disabled={!item.transcription}
-                        className="p-1.5 rounded-md hover:bg-bg-muted text-fg-subtle hover:text-accent transition-all disabled:opacity-30" 
-                        title="Download Transcript"
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
-
-                      {/* Open Full AI Report */}
-                      <button 
-                        onClick={() => handleOpenFullAIReport(item)}
-                        disabled={item.status !== "Completed"}
-                        className="p-1.5 rounded-md hover:bg-bg-muted text-fg-subtle hover:text-accent transition-all disabled:opacity-30" 
-                        title="Open Full AI Report"
-                      >
-                        <BookOpen className="h-4 w-4" />
-                      </button>
-
-                      {/* Manual Trigger Play button if pending/failed */}
-                      {(item.status === "Pending" || item.status === "Failed") && analyzingId !== item.id && (
-                        <button 
-                          onClick={() => handleAnalyze(item.id)}
-                          className="p-1.5 rounded-md bg-accent/10 text-accent hover:bg-accent hover:text-white transition-all shadow-sm" 
-                          title="Start AI Analysis"
+                  return (
+                    <tr
+                      key={item.id}
+                      className="group transition-colors hover:bg-bg-muted/30"
+                    >
+                      <td className="px-6 py-4">
+                        <span className="text-sm font-bold text-fg">
+                          {item.agentId || "UNASSIGNED"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                            item.language
+                              ? "border-accent/20 bg-accent/15 text-accent"
+                              : isInProgress
+                                ? "border-info/20 bg-info/10 text-info animate-pulse"
+                                : "border-border bg-bg-muted text-fg-subtle",
+                          )}
                         >
-                          <Play className="h-4 w-4 fill-current" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                          {item.language || (isInProgress ? "Detecting..." : "—")}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={cn(
+                            "block max-w-[150px] truncate text-sm",
+                            isInProgress ? "text-info italic" : "text-fg",
+                          )}
+                          title={item.sentiment || ""}
+                        >
+                          {displayField(item.sentiment)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        {item.score !== null ? (
+                          <span
+                            className={cn(
+                              "text-sm font-bold",
+                              item.score >= 80
+                                ? "text-success"
+                                : item.score >= 60
+                                  ? "text-warning"
+                                  : "text-danger",
+                            )}
+                          >
+                            {item.score}%
+                          </span>
+                        ) : (
+                          <span
+                            className={cn(
+                              "text-sm",
+                              isInProgress
+                                ? "text-info italic"
+                                : "text-fg-subtle",
+                            )}
+                          >
+                            {isInProgress ? "Calculating..." : "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={cn(
+                            "block max-w-[150px] truncate text-sm",
+                            isInProgress ? "text-info italic" : "text-fg",
+                          )}
+                          title={item.openingStatus || ""}
+                        >
+                          {displayField(item.openingStatus)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={cn(
+                            "block max-w-[150px] truncate text-sm",
+                            isInProgress ? "text-info italic" : "text-fg",
+                          )}
+                          title={item.tone || ""}
+                        >
+                          {displayField(item.tone)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={cn(
+                            "block max-w-[150px] truncate text-sm",
+                            isInProgress ? "text-info italic" : "text-fg",
+                          )}
+                          title={item.energyLevel || ""}
+                        >
+                          {displayField(item.energyLevel)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={cn(
+                            "block max-w-[150px] truncate text-sm",
+                            isInProgress ? "text-info italic" : "text-fg",
+                          )}
+                          title={item.activeListening || ""}
+                        >
+                          {displayField(item.activeListening)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex max-w-[180px] flex-col gap-1">
+                          <StatusBadge
+                            status={
+                              item.status === "Pending" && analyzingId === item.id
+                                ? "Processing"
+                                : item.status
+                            }
+                          />
+                          <span className="text-[10px] italic leading-tight text-fg-subtle">
+                            {item.statusReason ||
+                              (item.status === "Pending"
+                                ? "Waiting for analysis"
+                                : "")}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="whitespace-nowrap text-sm text-fg-subtle">
+                          {formatDate(item.createdAt)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end gap-1.5 opacity-90 transition-opacity group-hover:opacity-100">
+                          <button
+                            onClick={() => handleViewDetails(item)}
+                            className="rounded-md p-1.5 text-fg-subtle transition-all hover:bg-bg-muted hover:text-accent"
+                            title="View Details"
+                          >
+                            <FileText className="h-4 w-4" />
+                          </button>
+
+                          <button
+                            onClick={() => handleReanalyze(item.id)}
+                            disabled={analyzingId === item.id || isInProgress}
+                            className="rounded-md p-1.5 text-fg-subtle transition-all hover:bg-bg-muted hover:text-accent disabled:opacity-30"
+                            title="Reanalyze Call"
+                          >
+                            <RefreshCw
+                              className={cn(
+                                "h-4 w-4",
+                                analyzingId === item.id && "animate-spin",
+                              )}
+                            />
+                          </button>
+
+                          <button
+                            onClick={() => handleDownloadTranscript(item)}
+                            disabled={!item.transcription}
+                            className="rounded-md p-1.5 text-fg-subtle transition-all hover:bg-bg-muted hover:text-accent disabled:opacity-30"
+                            title="Download Transcript"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenFullAIReport(item)}
+                            disabled={item.status !== "Completed"}
+                            className="rounded-md p-1.5 text-fg-subtle transition-all hover:bg-bg-muted hover:text-accent disabled:opacity-30"
+                            title="Open Full AI Report"
+                          >
+                            <BookOpen className="h-4 w-4" />
+                          </button>
+
+                          {(item.status === "Pending" || item.status === "Failed") &&
+                            analyzingId !== item.id && (
+                              <button
+                                onClick={() => handleAnalyze(item.id)}
+                                className="rounded-md bg-accent/10 p-1.5 text-accent shadow-sm transition-all hover:bg-accent hover:text-white"
+                                title="Start AI Analysis"
+                              >
+                                <Play className="h-4 w-4 fill-current" />
+                              </button>
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
       </div>
 
-      <AnalysisDetailsModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        record={selectedRecord} 
+      <AnalysisDetailsModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        record={selectedRecord}
       />
     </>
   );

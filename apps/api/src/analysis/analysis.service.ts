@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { TranscriptionService } from "../transcription/transcription.service";
+import { OllamaAnalysisService } from "./ollama-analysis.service";
 import axios from "axios";
 import * as fs from "fs";
 import * as path from "path";
@@ -17,6 +18,7 @@ export class AnalysisService {
   constructor(
     private prisma: PrismaService,
     private transcriptionService: TranscriptionService,
+    private ollamaAnalysisService: OllamaAnalysisService
   ) {}
 
   async getAllRecordings() {
@@ -116,11 +118,11 @@ export class AnalysisService {
       console.log(`PROCESSING BACKGROUND AI JOB: ${id}`);
       console.log(`========================`);
 
-      // 1. Update status to Processing Audio
+      // 1. Update status to Transcribing
       let recording = await this.prisma.recording.update({
         where: { id },
         data: {
-          status: "Processing Audio",
+          status: "Transcribing",
           statusReason: "Validating call recording audio file...",
         },
       });
@@ -133,11 +135,11 @@ export class AnalysisService {
 
       this.logger.log(`[STT] Started transcription for recording ${id}`);
 
-      // 2. Update status to Generating Transcript
+      // 2. Update status to Transcribing
       await this.prisma.recording.update({
         where: { id },
         data: {
-          status: "Generating Transcript",
+          status: "Transcribing",
           statusReason: "Converting speech to text...",
         },
       });
@@ -154,7 +156,7 @@ export class AnalysisService {
             await this.prisma.recording.update({
               where: { id },
               data: {
-                status: "Generating Transcript",
+                status: "Transcribing",
                 statusReason: `Transcription delayed. Retrying (Attempt ${attempt}/2)...`,
               },
             });
@@ -162,7 +164,8 @@ export class AnalysisService {
             await new Promise((res) => setTimeout(res, delay));
           }
 
-          rawTranscript = await this.transcriptionService.transcribeAudio(recording.audioPath);
+          const transcriptionResult = await this.transcriptionService.transcribeAudio(recording.audioPath, id);
+          rawTranscript = transcriptionResult.transcript;
           if (rawTranscript && rawTranscript.trim() !== "") {
             transcribeErrorOccurred = null;
             break;
@@ -192,207 +195,8 @@ export class AnalysisService {
 
       console.log("SAVED TRANSCRIPT TO DATABASE:", rawTranscript.substring(0, 100) + "...");
 
-      const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
-      const ollamaModel = process.env.OLLAMA_MODEL || 'phi3';
-
-      // 1. Language Detection
-      let detectedLanguage = "English";
-      try {
-        console.log(`[Language Detection] Detecting language...`);
-        const langPrompt = `Identify the language of this Indian customer support call transcript. Choose the single most dominant language from: English, Hindi, Marathi, Hinglish. Return ONLY the single language name (e.g. English, Hindi, Marathi, Hinglish) without any other words or punctuation.
-
-Transcript:
-${rawTranscript.trim()}`;
-
-        const langResponse = await axios.post(
-          `${ollamaUrl}/api/generate`,
-          {
-            model: ollamaModel,
-            prompt: langPrompt,
-            stream: false,
-            options: {
-              temperature: 0.1,
-              num_predict: 10
-            }
-          },
-          { timeout: 30000 }
-        );
-
-        const langText = langResponse.data?.response?.trim() || "English";
-        console.log(`[Language Detection] Raw output: ${langText}`);
-        if (langText.toLowerCase().includes("hindi")) detectedLanguage = "Hindi";
-        else if (langText.toLowerCase().includes("marathi")) detectedLanguage = "Marathi";
-        else if (langText.toLowerCase().includes("hinglish")) detectedLanguage = "Hinglish";
-        else detectedLanguage = "English";
-      } catch (err: any) {
-        console.error(`[Language Detection] Failed, defaulting to English:`, err.message);
-        detectedLanguage = "English";
-      }
-      this.logger.log(`[Language Detection] Detected Language: ${detectedLanguage}`);
-
-      const prompt = `
-You are an enterprise AI QA analyst for Indian customer support calls.
-
-You are analyzing Indian customer support conversations that may contain Hindi, Marathi, Hinglish, or mixed-language speech. Evaluate naturally and do not penalize regional languages. Do not mark calls as "frustrated" only because of Hindi words, loud speech, or regional language usage.
-
-Analyze the following transcript:
-Dominant Language: ${detectedLanguage}
-Transcript:
-${rawTranscript.trim()}
-
-Evaluate and score the call based on these five categories (0-100 scale):
-1. Tone Stability (weight: 15%): Professional, polite, calm, and steady tone.
-2. Active Listening (weight: 20%): Empathy, understanding customer concern, not interrupting.
-3. Resolution Quality (weight: 25%): Effectively addressing customer concern, providing correct information.
-4. Professionalism (weight: 15%): Proper greeting, adhering to call etiquette, confidence.
-5. Customer Satisfaction (weight: 25%): Respectfulness, emotional control, and resolution acceptance.
-
-Also provide:
-- sentiment: Customer sentiment (e.g. Positive, Neutral, Negative, Frustrated)
-- sentimentConfidence: Confidence score of sentiment (0 to 100)
-- isGenuinelyBad: set to true ONLY if the call quality is truly terrible (e.g. agent rude, zero help, customer hung up in anger), otherwise false.
-- summary: A concise summary of the conversation.
-- statusReason: A brief reason for the final score.
-- openingStatus: A brief description of how the agent opened the call.
-- tone: A brief description of the agent's tone.
-- energyLevel: A brief description of the agent's energy level.
-- activeListening: A brief description of the agent's active listening skills.
-
-Return ONLY a valid JSON object matching this schema. Do not include any markdown styling, quotes outside JSON, or extra text.
-
-{
-  "toneScore": 0,
-  "listeningScore": 0,
-  "resolutionScore": 0,
-  "professionalismScore": 0,
-  "satisfactionScore": 0,
-  "sentiment": "",
-  "sentimentConfidence": 0,
-  "isGenuinelyBad": false,
-  "summary": "",
-  "statusReason": "",
-  "openingStatus": "",
-  "tone": "",
-  "energyLevel": "",
-  "activeListening": ""
-}
-`;
-
-      let response: any = null;
-      let errorOccurred: any = null;
-      const retryDelays = [2000, 5000, 10000];
-
-      // RETRY PIPELINE
-      for (let attempt = 0; attempt <= 3; attempt++) {
-        try {
-          if (attempt > 0) {
-            console.log(`RETRYING AI GENERATION FOR RECORDING ${id} (ATTEMPT ${attempt}/3)...`);
-            
-            await this.prisma.recording.update({
-              where: { id },
-              data: {
-                status: "Retrying",
-                statusReason: `Ollama call failed. Retrying (Attempt ${attempt}/3)...`,
-              },
-            });
-
-            // Wait progressive delay time
-            const delay = retryDelays[attempt - 1] || 10000;
-            await new Promise((res) => setTimeout(res, delay));
-          }
-
-          console.log(`CALLING OLLAMA AI ENGINE...`);
-          response = await axios.post(
-            `${ollamaUrl}/api/generate`,
-            {
-              model: ollamaModel,
-              prompt,
-              stream: false,
-              format: 'json',
-              options: {
-                temperature: 0.9,
-                top_p: 0.95,
-                num_predict: 800
-              }
-            },
-            {
-              timeout: 180000,
-            }
-          );
-
-          if (response) {
-            errorOccurred = null;
-            break;
-          }
-        } catch (err: any) {
-          console.log(`OLLAMA CALL ATTEMPT ${attempt} FAILED:`, err.message);
-          errorOccurred = err;
-        }
-      }
-
-      if (errorOccurred) {
-        throw errorOccurred;
-      }
-
-      console.log('STEP 4 RAW RESPONSE');
-      const raw = response?.data?.response
-        ?.replace(/```json/g, '')
-        ?.replace(/```/g, '')
-        ?.trim() || '';
-      console.log(raw);
-
-      if (!raw) {
-        throw new Error("Empty response from Ollama");
-      }
-
-      console.log('STEP 5 JSON PARSE');
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error("No JSON object found in Ollama response");
-      }
-      const parsedResult = JSON.parse(jsonMatch[0]);
-
-      // Calculate weighted score
-      const toneScore = Number(parsedResult.toneScore) || 70;
-      const listeningScore = Number(parsedResult.listeningScore) || 70;
-      const resolutionScore = Number(parsedResult.resolutionScore) || 70;
-      const professionalismScore = Number(parsedResult.professionalismScore) || 70;
-      const satisfactionScore = Number(parsedResult.satisfactionScore) || 70;
-
-      let calculatedScore = Math.round(
-        (toneScore * 0.15) +
-        (listeningScore * 0.20) +
-        (resolutionScore * 0.25) +
-        (professionalismScore * 0.15) +
-        (satisfactionScore * 0.25)
-      );
-
-      // Clamping and fallbacks
-      const isGenuinelyBad = !!parsedResult.isGenuinelyBad;
-      if (calculatedScore < 60 && !isGenuinelyBad) {
-        calculatedScore = 60; // Fallback Minimum Score: minimum should be 60 unless call is truly terrible
-      }
-
-      // Never default to 0 unless analysis completely fails
-      if (calculatedScore <= 0) {
-        calculatedScore = 60;
-      }
-
-      // Log Debug AI Output
-      console.log("==================================================");
-      console.log("[DEBUG AI Output]");
-      console.log(`- Transcript Language: ${detectedLanguage}`);
-      console.log(`- Raw AI Response: ${raw}`);
-      console.log(`- Scoring Breakdown:`);
-      console.log(`  * Tone Score: ${toneScore} (15%)`);
-      console.log(`  * Active Listening Score: ${listeningScore} (20%)`);
-      console.log(`  * Resolution Quality Score: ${resolutionScore} (25%)`);
-      console.log(`  * Professionalism Score: ${professionalismScore} (15%)`);
-      console.log(`  * Customer Satisfaction Score: ${satisfactionScore} (25%)`);
-      console.log(`  * Calculated Weighted Score: ${calculatedScore}`);
-      console.log(`  * Is Genuinely Bad: ${isGenuinelyBad}`);
-      console.log(`- Sentiment Confidence: ${parsedResult.sentimentConfidence || 100}%`);
-      console.log("==================================================");
+      // 4. Run AI Analysis via local Ollama Service
+      const parsedResult = await this.ollamaAnalysisService.analyzeTranscript(rawTranscript.trim());
 
       console.log('STEP 6 UPDATE DATABASE (SAVING RESULTS IMMEDIATELY)');
       const truncate = (str: any, len: number) => String(str || '').substring(0, len);
@@ -401,16 +205,17 @@ Return ONLY a valid JSON object matching this schema. Do not include any markdow
         where: { id },
         data: {
           sentiment: truncate(parsedResult.sentiment, 191),
-          score: calculatedScore,
+          score: parsedResult.score,
           openingStatus: truncate(parsedResult.openingStatus, 191),
           tone: truncate(parsedResult.tone, 191),
           energyLevel: truncate(parsedResult.energyLevel, 191),
           activeListening: truncate(parsedResult.activeListening, 191),
           status: 'Completed', 
-          statusReason: parsedResult.statusReason ? truncate(parsedResult.statusReason, 191) : 'AI Analysis completed successfully',
+          statusReason: 'AI Analysis completed successfully',
           summary: truncate(parsedResult.summary, 1000),
-          language: detectedLanguage,
-        },
+          language: truncate(parsedResult.language, 191),
+          coachingFeedback: truncate(parsedResult.coachingFeedback, 1000)
+        } as any,
       });
 
       console.log(`[Ollama] AI analysis completed`);

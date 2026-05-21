@@ -4,12 +4,13 @@ export interface AnalysisRecord {
   id: string;
   agent: string;
   agentId?: string;
-  sentiment: "Positive" | "Neutral" | "Negative" | null;
+  sentiment: string | null;
   score: number | null;
   result: string | null;
+  coachingFeedback?: string | null;
   summary?: string | null;
   transcription?: string | null;
-  status: "Pending" | "Processing" | "Completed" | "Failed" | "Retrying" | "Uploading" | "Processing Audio" | "Generating Transcript" | "Running AI Analysis";
+  status: "Pending" | "Processing" | "Completed" | "Failed" | "Retrying" | "Uploading" | "Processing Audio" | "Generating Transcript" | "Detecting Language" | "Running AI Analysis" | "Saving Results";
   language?: string | null;
   statusReason?: string | null;
   createdAt: string;
@@ -34,5 +35,8 @@ export const getAnalysisRecords = async (): Promise<AnalysisRecord[]> => {
  */
 export const analyzeRecording = async (id: string): Promise<AnalysisRecord> => {
   const response = await api.post<{ success: boolean; analysis: AnalysisRecord }>(`/analysis/analyze/${id}`);
-  return response.data?.analysis;
+  if (!response.data?.success || !response.data?.analysis) {
+    throw new Error((response.data as { error?: string } | undefined)?.error || "Failed to queue analysis");
+  }
+  return response.data.analysis;
 };

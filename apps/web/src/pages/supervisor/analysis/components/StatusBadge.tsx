@@ -11,7 +11,9 @@ const StatusBadge = ({ status }: StatusBadgeProps) => {
     Uploading:              "bg-accent/10 text-accent border-accent/20 animate-pulse",
     "Processing Audio":     "bg-info/10 text-info border-info/20 animate-pulse",
     "Generating Transcript": "bg-info/10 text-info border-info/20 animate-pulse",
+    "Detecting Language":    "bg-info/10 text-info border-info/20 animate-pulse",
     "Running AI Analysis":   "bg-info/10 text-info border-info/20 animate-pulse",
+    "Saving Results":        "bg-success/10 text-success border-success/20 animate-pulse",
     Completed:              "bg-success/10 text-success border-success/20",
     Failed:                 "bg-danger/10 text-danger border-danger/20",
     // Keep temporary/fallback backward compatibility mapping

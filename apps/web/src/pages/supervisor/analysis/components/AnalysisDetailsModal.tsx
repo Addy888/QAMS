@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ShieldAlert } from "lucide-react";
-import type { AnalysisRecord } from "@/services/analysis.service";
+import { X, ShieldAlert, AlertTriangle } from "lucide-react";
 
+import type { AnalysisRecord } from "@/services/analysis.service";
 
 interface AnalysisDetailsModalProps {
   isOpen: boolean;
@@ -9,104 +9,192 @@ interface AnalysisDetailsModalProps {
   record: AnalysisRecord | null;
 }
 
-const AnalysisDetailsModal = ({ isOpen, onClose, record }: AnalysisDetailsModalProps) => {
+const AnalysisDetailsModal = ({
+  isOpen,
+  onClose,
+  record,
+}: AnalysisDetailsModalProps) => {
   if (!record) return null;
+
+  const isInProgress = !["Completed", "Failed"].includes(record.status || "");
+
+  const safeValue = (
+    value: string | null | undefined,
+    processingFallback = "Processing...",
+  ) => {
+    if (value) return value;
+    if (isInProgress) return processingFallback;
+    return "—";
+  };
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="w-full max-w-2xl bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden"
+            className="w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
           >
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-bg-muted/30">
+            <div className="flex items-center justify-between border-b border-border bg-bg-muted/30 px-6 py-4">
               <div>
                 <h3 className="text-xl font-bold text-fg">Analysis Details</h3>
-                <p className="text-xs text-fg-subtle">Record ID: {record.id} • {record.createdAt}</p>
+                <p className="text-xs text-fg-subtle">
+                  Record ID: {record.id} • {record.createdAt}
+                </p>
               </div>
               <button
                 onClick={onClose}
-                className="p-2 hover:bg-bg-muted rounded-full transition-colors text-fg-subtle hover:text-fg"
+                className="rounded-full p-2 text-fg-subtle transition-colors hover:bg-bg-muted hover:text-fg"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Content */}
-            <div className="p-6 space-y-8 max-h-[80vh] overflow-y-auto">
-              {/* Agent Overview */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-                <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                  <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">Agent</p>
-                  <p className="text-sm font-semibold text-fg truncate">{record.agentId}</p>
-                </div>
-                <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                  <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">Language</p>
-                  <p className="text-sm font-semibold text-fg">{record.language || "—"}</p>
-                </div>
-                <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                  <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">AI Score</p>
-                  <p className={`text-xl font-black ${(record.score ?? 0) >= 80 ? 'text-success' : (record.score ?? 0) >= 60 ? 'text-warning' : 'text-danger'}`}>
-                    {record.score != null ? `${record.score}%` : "-"}
+            <div className="max-h-[80vh] space-y-8 overflow-y-auto p-6">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+                <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                  <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                    Agent
+                  </p>
+                  <p className="truncate text-sm font-semibold text-fg">
+                    {record.agentId}
                   </p>
                 </div>
-                <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                  <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">Sentiment</p>
-                  <p className="text-sm font-medium text-fg break-words">{record.sentiment || "—"}</p>
+                <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                  <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                    Language
+                  </p>
+                  <p className="text-sm font-semibold text-fg">
+                    {safeValue(record.language, "Detecting...")}
+                  </p>
                 </div>
-                <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                  <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">Opening Status</p>
-                  <p className="text-sm font-medium text-fg break-words truncate" title={record.openingStatus || ""}>{record.openingStatus || "—"}</p>
+                <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                  <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                    AI Score
+                  </p>
+                  <p
+                    className={`text-xl font-black ${
+                      record.score !== null
+                        ? record.score >= 80
+                          ? "text-success"
+                          : record.score >= 60
+                            ? "text-warning"
+                            : "text-danger"
+                        : isInProgress
+                          ? "text-info"
+                          : "text-fg-subtle"
+                    }`}
+                  >
+                    {record.score !== null
+                      ? `${record.score}%`
+                      : isInProgress
+                        ? "Calculating..."
+                        : "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                  <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                    Sentiment
+                  </p>
+                  <p className="break-words text-sm font-medium text-fg">
+                    {safeValue(record.sentiment)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                  <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                    Opening Status
+                  </p>
+                  <p
+                    className="truncate text-sm font-medium text-fg"
+                    title={record.openingStatus || ""}
+                  >
+                    {safeValue(record.openingStatus)}
+                  </p>
                 </div>
               </div>
 
-              {/* General Feedback / AI Summary */}
+              {record.status === "Failed" && (
+                <div className="rounded-xl border border-danger/20 bg-danger/5 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-danger">
+                    <AlertTriangle className="h-5 w-5" />
+                    <h4 className="font-bold">Backend Failure</h4>
+                  </div>
+                  <p className="text-sm leading-relaxed text-fg">
+                    {record.statusReason || "The backend did not return an error message."}
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-fg">
                   <ShieldAlert className="h-5 w-5 text-warning" />
                   <h4 className="font-bold">AI Summary</h4>
                 </div>
-                <p className="text-sm p-4 bg-surface border border-border rounded-xl text-fg leading-relaxed">
-                  {record.summary || "No AI summary available yet. Run analysis to generate insights."}
+                <p className="rounded-xl border border-border bg-surface p-4 text-sm leading-relaxed text-fg">
+                  {record.summary ||
+                    (isInProgress
+                      ? "The backend is still building the structured AI summary."
+                      : "No AI summary is available for this call yet.")}
                 </p>
               </div>
 
-              {/* Metrics Row */}
-              {(record.tone || record.energyLevel || record.activeListening) && (
+              <div className="space-y-3">
+                <h4 className="font-bold text-fg">Coaching Feedback</h4>
+                <p className="rounded-xl border border-border bg-surface p-4 text-sm leading-relaxed text-fg">
+                  {record.coachingFeedback ||
+                    record.result ||
+                    (isInProgress
+                      ? "The backend is still generating coaching feedback."
+                      : "No coaching feedback is available for this call yet.")}
+                </p>
+              </div>
+
+              {(record.status === "Completed" ||
+                record.tone ||
+                record.energyLevel ||
+                record.activeListening) && (
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                    <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">Tone</p>
-                    <p className="text-sm font-semibold text-fg">{record.tone ?? "—"}</p>
+                  <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                    <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                      Tone
+                    </p>
+                    <p className="text-sm font-semibold text-fg">
+                      {safeValue(record.tone)}
+                    </p>
                   </div>
-                  <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                    <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">Energy Level</p>
-                    <p className="text-sm font-semibold text-fg">{record.energyLevel ?? "—"}</p>
+                  <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                    <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                      Energy Level
+                    </p>
+                    <p className="text-sm font-semibold text-fg">
+                      {safeValue(record.energyLevel)}
+                    </p>
                   </div>
-                  <div className="p-4 bg-bg-muted/50 rounded-xl border border-border">
-                    <p className="text-[10px] uppercase font-bold text-fg-subtle mb-1">Active Listening</p>
-                    <p className="text-sm font-semibold text-fg">{record.activeListening ?? "—"}</p>
+                  <div className="rounded-xl border border-border bg-bg-muted/50 p-4">
+                    <p className="mb-1 text-[10px] font-bold uppercase text-fg-subtle">
+                      Active Listening
+                    </p>
+                    <p className="text-sm font-semibold text-fg">
+                      {safeValue(record.activeListening)}
+                    </p>
                   </div>
                 </div>
               )}
 
-              {/* Call Transcript */}
               <div className="space-y-3">
                 <h4 className="font-bold text-fg">Call Transcript</h4>
-                <div className="p-4 bg-bg-muted/30 border border-border rounded-xl text-xs text-fg max-h-40 overflow-y-auto whitespace-pre-wrap leading-relaxed font-mono">
+                <div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-xl border border-border bg-bg-muted/30 p-4 font-mono text-xs leading-relaxed text-fg">
                   {record.transcription || "No transcription available."}
                 </div>
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="px-6 py-4 border-t border-border bg-bg-muted/10 flex justify-end">
+            <div className="flex justify-end border-t border-border bg-bg-muted/10 px-6 py-4">
               <button
                 onClick={onClose}
-                className="px-4 py-2 rounded-lg bg-bg-muted hover:bg-border text-fg text-sm font-medium transition-colors"
+                className="rounded-lg bg-bg-muted px-4 py-2 text-sm font-medium text-fg transition-colors hover:bg-border"
               >
                 Close Details
               </button>

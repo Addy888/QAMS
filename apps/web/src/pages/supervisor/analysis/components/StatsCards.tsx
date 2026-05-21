@@ -37,12 +37,14 @@ const StatsCards = ({ data }: StatsCardsProps) => {
     r.status === "Uploading" ||
     r.status === "Processing Audio" ||
     r.status === "Generating Transcript" ||
+    r.status === "Detecting Language" ||
     r.status === "Running AI Analysis" ||
+    r.status === "Saving Results" ||
     r.status === "Retrying"
   ).length;
   const scores    = records
     .map((r) => r.score)
-    .filter((s): s is number => s != null && s > 0);
+    .filter((s): s is number => s != null);
   const avgScore  = scores.length
     ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
     : 0;

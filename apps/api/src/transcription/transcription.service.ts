@@ -1,147 +1,253 @@
-import { Injectable, Logger } from '@nestjs/common';
-import * as fs from 'fs';
-import * as pathModule from 'path';
-import axios from 'axios';
+import { Injectable, Logger } from "@nestjs/common";
+import { spawn } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import { resolveApiPath, resolveAudioPath } from "../analysis/runtime-paths";
+
+export interface LocalTranscriptionResult {
+  transcript: string;
+  detectedLanguageCode: string | null;
+  detectedLanguageProbability: number | null;
+  durationSeconds: number | null;
+  segmentCount: number;
+  model: string;
+  provider: "faster-whisper";
+  rawOutput: string;
+}
+
+interface LocalRuntimeConfig {
+  pythonBin: string;
+  model: string;
+  device: string;
+  computeType: string;
+  beamSize: number;
+  vadFilter: boolean;
+  cpuThreads: number;
+  modelCacheDir?: string;
+  initialPrompt: string;
+}
 
 @Injectable()
 export class TranscriptionService {
   private readonly logger = new Logger(TranscriptionService.name);
 
-  private getMockTranscript(): string {
-    const mocks = [
-      "Customer called complaining about the unexpected charge of $50 on their credit card. They requested a full refund as they did not authorize it.",
-      "नमस्ते, मेरे अकाउंट से पैसे कट गए हैं बिना किसी जानकारी के। मुझे तुरंत अपना रिफंड चाहिए। मैं बहुत परेशान हूँ।",
-      "हॅलो, माझ्या खात्यातून अतिरिक्त पैसे वजा झाले आहेत. कृपया हे पैसे परत करा, नाहीतर मला तक्रार करावी लागेल।",
-      "Mera bill is month bohot high aaya hai. Please check karke refund issue kijiye, otherwise I will close my connection."
+  async transcribeAudio(
+    audioPath: string,
+    recordingId: string,
+  ): Promise<LocalTranscriptionResult> {
+    const absolutePath = resolveAudioPath(audioPath);
+    const runtime = this.getRuntimeConfig();
+
+    this.logger.log(
+      `[Transcription][${recordingId}] START path=${audioPath} resolved=${absolutePath}`,
+    );
+
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(
+        `Audio validation failed: file not found at ${audioPath} (resolved ${absolutePath})`,
+      );
+    }
+
+    const scriptPath = this.getTranscriptionScriptPath();
+    const args = [
+      scriptPath,
+      "--audio-path",
+      absolutePath,
+      "--model",
+      runtime.model,
+      "--device",
+      runtime.device,
+      "--compute-type",
+      runtime.computeType,
+      "--beam-size",
+      String(runtime.beamSize),
+      "--cpu-threads",
+      String(runtime.cpuThreads),
+      "--initial-prompt",
+      runtime.initialPrompt,
     ];
-    const index = Math.floor(Math.random() * mocks.length);
-    return mocks[index];
+
+    if (runtime.vadFilter) {
+      args.push("--vad-filter");
+    }
+
+    if (runtime.modelCacheDir) {
+      args.push("--model-cache-dir", runtime.modelCacheDir);
+    }
+
+    const startedAt = Date.now();
+    const { stdout, stderr, exitCode } = await this.runPythonProcess(
+      runtime.pythonBin,
+      args,
+    );
+    const durationMs = Date.now() - startedAt;
+
+    if (exitCode !== 0) {
+      const errorMessage = stderr.trim() || stdout.trim() || "Unknown failure";
+      throw new Error(
+        `Local transcription failed: ${errorMessage}. Ensure faster-whisper is installed and the configured model can run on this machine.`,
+      );
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch (error: any) {
+      throw new Error(
+        `Local transcription returned invalid JSON: ${error.message}. Raw output: ${stdout.slice(0, 500)}`,
+      );
+    }
+
+    const transcript = String(parsed.transcript ?? "").trim();
+    if (!transcript) {
+      throw new Error(
+        "Transcript validation failed: faster-whisper returned empty text.",
+      );
+    }
+
+    const result: LocalTranscriptionResult = {
+      transcript,
+      detectedLanguageCode: this.asOptionalString(parsed.detectedLanguageCode),
+      detectedLanguageProbability: this.asOptionalNumber(
+        parsed.detectedLanguageProbability,
+      ),
+      durationSeconds: this.asOptionalNumber(parsed.durationSeconds),
+      segmentCount: Number(parsed.segmentCount ?? 0) || 0,
+      model: this.asOptionalString(parsed.model) || runtime.model,
+      provider: "faster-whisper",
+      rawOutput: stdout,
+    };
+
+    this.logger.log(
+      `[Transcription][${recordingId}] Completed in ${durationMs}ms model=${result.model} language=${result.detectedLanguageCode ?? "unknown"} segments=${result.segmentCount} chars=${result.transcript.length}`,
+    );
+
+    return result;
   }
 
-  async transcribeAudio(audioPath: string): Promise<string> {
-    const absolutePath = pathModule.resolve(process.cwd(), audioPath);
-    const exists = fs.existsSync(absolutePath);
+  getDiagnostics() {
+    const runtime = this.getRuntimeConfig();
+    const scriptPath = this.getTranscriptionScriptPath();
 
-    this.logger.log(`[Transcription] Processing audio path: ${absolutePath}`);
-    this.logger.log(`[Transcription] File exists: ${exists}`);
+    return {
+      pythonBin: runtime.pythonBin,
+      model: runtime.model,
+      device: runtime.device,
+      computeType: runtime.computeType,
+      beamSize: runtime.beamSize,
+      vadFilter: runtime.vadFilter,
+      cpuThreads: runtime.cpuThreads,
+      scriptPath,
+      scriptExists: fs.existsSync(scriptPath),
+    };
+  }
 
-    if (!exists) {
-      throw new Error(`Audio file not found at path: ${absolutePath}`);
-    }
+  private getRuntimeConfig(): LocalRuntimeConfig {
+    return {
+      pythonBin: process.env.LOCAL_PYTHON_BIN?.trim() || "python",
+      model: process.env.FASTER_WHISPER_MODEL?.trim() || "small",
+      device: process.env.FASTER_WHISPER_DEVICE?.trim() || "cpu",
+      computeType:
+        process.env.FASTER_WHISPER_COMPUTE_TYPE?.trim() || "int8",
+      beamSize: this.parseInteger(process.env.FASTER_WHISPER_BEAM_SIZE, 1),
+      vadFilter: this.parseBoolean(process.env.FASTER_WHISPER_VAD_FILTER, true),
+      cpuThreads: this.parseInteger(process.env.FASTER_WHISPER_CPU_THREADS, 4),
+      modelCacheDir: process.env.FASTER_WHISPER_MODEL_CACHE_DIR?.trim(),
+      initialPrompt:
+        process.env.FASTER_WHISPER_INITIAL_PROMPT?.trim() ||
+        "This is a real Indian customer support call. The conversation may contain Hindi, Marathi, Hinglish, or mixed-language speech. Preserve names, numbers, and code-switched phrases naturally.",
+    };
+  }
 
-    const openAiKey = process.env.OPENAI_API_KEY;
-    const deepgramKey = process.env.DEEPGRAM_API_KEY;
-    const assemblyAiKey = process.env.ASSEMBLYAI_API_KEY;
+  private getTranscriptionScriptPath() {
+    const candidates = [
+      resolveApiPath("scripts", "transcribe_audio.py"),
+      path.resolve(process.cwd(), "apps", "api", "scripts", "transcribe_audio.py"),
+      path.resolve(process.cwd(), "scripts", "transcribe_audio.py"),
+    ];
 
-    // If no keys are provided, throw error immediately
-    if (!openAiKey && !deepgramKey && !assemblyAiKey) {
-      throw new Error('Transcription unavailable. AI analysis could not be completed.');
-    }
-
-    try {
-      if (openAiKey) {
-        this.logger.log('[Transcription] Using OpenAI Whisper API...');
-        const fileBuffer = fs.readFileSync(absolutePath);
-        const fileBlob = new Blob([fileBuffer], { type: 'audio/mpeg' });
-        const formData = new FormData();
-        formData.append('file', fileBlob, pathModule.basename(absolutePath));
-        formData.append('model', 'whisper-1');
-
-        const response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
-          headers: {
-            'Authorization': `Bearer ${openAiKey}`,
-            'Content-Type': 'multipart/form-data',
-          },
-          timeout: 60000,
-        });
-
-        const text = response.data?.text || '';
-        this.logger.log(`[Transcription] OpenAI Whisper response status: ${response.status}`);
-        return text;
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
       }
+    }
 
-      if (deepgramKey) {
-        this.logger.log('[Transcription] Using Deepgram API...');
-        const fileBuffer = fs.readFileSync(absolutePath);
-        const response = await axios.post(
-          'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
-          fileBuffer,
-          {
-            headers: {
-              'Authorization': `Token ${deepgramKey}`,
-              'Content-Type': 'application/octet-stream',
-            },
-            timeout: 60000,
-          }
+    return candidates[0];
+  }
+
+  private runPythonProcess(pythonBin: string, args: string[]) {
+    return new Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+    }>((resolve, reject) => {
+      const child = spawn(pythonBin, args, {
+        cwd: path.dirname(args[0]),
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+
+      child.on("error", (error) => {
+        reject(
+          new Error(
+            `Unable to start Python transcription worker using '${pythonBin}': ${error.message}`,
+          ),
         );
+      });
 
-        const text = response.data?.results?.channels[0]?.alternatives[0]?.transcript || '';
-        this.logger.log(`[Transcription] Deepgram response status: ${response.status}`);
-        return text;
-      }
-
-      if (assemblyAiKey) {
-        this.logger.log('[Transcription] Using AssemblyAI API...');
-        const fileBuffer = fs.readFileSync(absolutePath);
-        
-        // 1. Upload
-        const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', fileBuffer, {
-          headers: {
-            'authorization': assemblyAiKey,
-            'content-type': 'application/octet-stream',
-          },
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
-          timeout: 60000,
+      child.on("close", (exitCode) => {
+        resolve({
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          exitCode,
         });
-        const uploadUrl = uploadResponse.data.upload_url;
+      });
+    });
+  }
 
-        // 2. Start transcription
-        const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', {
-          audio_url: uploadUrl,
-        }, {
-          headers: {
-            'authorization': assemblyAiKey,
-            'content-type': 'application/json',
-          },
-          timeout: 10000,
-        });
-        const transcriptId = transcriptResponse.data.id;
-
-        // 3. Poll
-        let status = 'queued';
-        let transcriptText = '';
-        const startTime = Date.now();
-        const maxPollTime = 120000; // 2 minutes
-
-        while (status === 'queued' || status === 'processing') {
-          if (Date.now() - startTime > maxPollTime) {
-            throw new Error('AssemblyAI transcription polling timed out.');
-          }
-          await new Promise((res) => setTimeout(res, 3000));
-          const statusResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
-            headers: {
-              'authorization': assemblyAiKey,
-            },
-            timeout: 10000,
-          });
-          status = statusResponse.data.status;
-          if (status === 'completed') {
-            transcriptText = statusResponse.data.text;
-            break;
-          } else if (status === 'error') {
-            throw new Error(`AssemblyAI error: ${statusResponse.data.error}`);
-          }
-        }
-
-        this.logger.log('[Transcription] AssemblyAI transcription completed successfully.');
-        return transcriptText;
-      }
-
-      throw new Error('No valid STT API key matched execution block.');
-    } catch (error: any) {
-      this.logger.error(`[Transcription] API Error: ${error.message}`);
-      throw new Error('Transcription unavailable. AI analysis could not be completed.');
+  private parseBoolean(value: string | undefined, defaultValue: boolean) {
+    if (!value) {
+      return defaultValue;
     }
+
+    return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  }
+
+  private parseInteger(value: string | undefined, defaultValue: number) {
+    const parsed = Number.parseInt(value ?? "", 10);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+  }
+
+  private asOptionalString(value: unknown) {
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+  }
+
+  private asOptionalNumber(value: unknown) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    return null;
   }
 }

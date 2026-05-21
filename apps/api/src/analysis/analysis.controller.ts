@@ -11,6 +11,38 @@ export class AnalysisController {
     private readonly analysisService: AnalysisService,
   ) {}
 
+  @Get('health/diagnostic')
+  async getDiagnostic() {
+    const diagnostics: any = {
+      timestamp: new Date().toISOString(),
+      environment: {
+        OLLAMA_URL: process.env.OLLAMA_URL || 'NOT SET',
+        OLLAMA_MODEL: process.env.OLLAMA_MODEL || 'NOT SET',
+      },
+      uploadPath: {
+        relative: 'uploads/recordings',
+        absolute: path.join(process.cwd(), 'uploads', 'recordings'),
+        exists: fs.existsSync(path.join(process.cwd(), 'uploads', 'recordings')),
+      },
+      recordingFiles: [] as string[],
+      requiredConfiguration: [
+        'Set up Ollama at http://localhost:11434 (check if running)',
+      ],
+    };
+
+    try {
+      const recordingsDir = path.join(process.cwd(), 'uploads', 'recordings');
+      if (fs.existsSync(recordingsDir)) {
+        const files = fs.readdirSync(recordingsDir);
+        diagnostics.recordingFiles = files.slice(0, 10); // Show first 10
+      }
+    } catch (err: any) {
+      diagnostics.recordingFiles = [`Error reading directory: ${err.message}`];
+    }
+
+    return diagnostics;
+  }
+
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {
