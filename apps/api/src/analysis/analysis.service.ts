@@ -343,7 +343,10 @@ export class AnalysisService implements OnModuleInit {
           statusReason: 'AI Analysis completed successfully',
           summary: truncate(parsedResult.summary, 1000),
           language: truncate(parsedResult.language || resolvedLanguage, 191),
-          coachingFeedback: truncate(parsedResult.coachingFeedback, 1000)
+          coachingFeedback: truncate(parsedResult.coachingFeedback, 1000),
+          customerMood: truncate(parsedResult.customerMood, 191),
+          resolutionQuality: truncate(parsedResult.resolutionQuality, 191),
+          escalationRisk: truncate(parsedResult.escalationRisk, 191)
         } as any,
       });
 

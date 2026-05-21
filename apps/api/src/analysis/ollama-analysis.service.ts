@@ -11,6 +11,9 @@ export interface AIAnalysisResult {
   activeListening: string;
   summary: string;
   coachingFeedback: string;
+  customerMood: string;
+  resolutionQuality: string;
+  escalationRisk: string;
 }
 
 @Injectable()
@@ -22,21 +25,51 @@ export class OllamaAnalysisService {
     const ollamaModel = process.env.OLLAMA_MODEL || "llama3";
     const ollamaTimeout = Number(process.env.OLLAMA_TIMEOUT_MS) || 60000;
 
-    const prompt = `You are analyzing real Indian customer support conversations.
-The conversation may contain Hindi, Marathi, Hinglish, or mixed-language speech.
-Evaluate naturally and do not penalize regional languages.
+    const prompt = `You are an expert QA auditor analyzing real Indian customer support conversations.
+
+Analyze the ACTUAL transcript carefully.
+Every response must be based ONLY on transcript behavior.
+
+Do NOT generate generic answers.
+Do NOT reuse repetitive outputs.
+Evaluate naturally and realistically.
+
+The conversation may contain:
+- Hindi
+- Marathi
+- Hinglish
+- mixed-language speech
+
+Evaluate:
+- customer mood
+- agent professionalism
+- empathy
+- listening quality
+- issue resolution
+- communication clarity
+- confidence
+- interruptions
+- escalation handling
+
+Generate realistic scoring based on transcript quality.
+- Excellent calls -> 85-95
+- Average calls -> 60-80
+- Weak calls -> 40-60
 
 Return ONLY valid JSON matching this exact structure:
 {
   "language": "Hindi",
   "sentiment": "Positive",
-  "score": 78,
-  "openingStatus": "Professional",
-  "tone": "Friendly",
-  "energyLevel": "Calm",
-  "activeListening": "Good",
-  "summary": "Customer issue handled professionally.",
-  "coachingFeedback": "Improve response speed slightly."
+  "score": 82,
+  "openingStatus": "Warm and Professional",
+  "tone": "Empathetic and Friendly",
+  "energyLevel": "Moderately Engaged",
+  "activeListening": "Strong",
+  "summary": "...",
+  "coachingFeedback": "...",
+  "customerMood": "...",
+  "resolutionQuality": "...",
+  "escalationRisk": "Low"
 }
 
 Transcript:
@@ -53,7 +86,8 @@ ${transcript}`;
           stream: false,
           format: "json", // Enforce JSON
           options: {
-            temperature: 0.1, // Keep it deterministic
+            temperature: 0.7, // Increased for creativity
+            top_p: 0.9,
             num_predict: 800,
           },
         },
@@ -91,13 +125,16 @@ ${transcript}`;
       return {
         language: parsed.language || "English",
         sentiment: parsed.sentiment || "Neutral",
-        score: typeof parsed.score === 'number' ? parsed.score : 60,
+        score: typeof parsed.score === 'number' ? parsed.score : 65,
         openingStatus: parsed.openingStatus || "Standard",
         tone: parsed.tone || "Neutral",
         energyLevel: parsed.energyLevel || "Normal",
         activeListening: parsed.activeListening || "Adequate",
         summary: parsed.summary || "Conversation transcribed.",
-        coachingFeedback: parsed.coachingFeedback || "No specific coaching feedback provided."
+        coachingFeedback: parsed.coachingFeedback || "No specific coaching feedback provided.",
+        customerMood: parsed.customerMood || "Neutral",
+        resolutionQuality: parsed.resolutionQuality || "Average",
+        escalationRisk: parsed.escalationRisk || "Low"
       };
     } catch (e) {
       this.logger.error(`Failed to parse JSON safely: ${cleaned}`);
@@ -111,46 +148,60 @@ ${transcript}`;
     
     // Detect sentiment from keywords
     const positiveSentiments = (lower.match(/thank|appreciate|perfect|great|excellent|satisfied|happy|resolved|solved/gi) || []).length;
-    const negativeSentiments = (lower.match(/complaint|issue|problem|angry|frustrated|upset|dissatisfied|refund|cancel/gi) || []).length;
+    const negativeSentiments = (lower.match(/complaint|issue|problem|angry|frustrated|upset|dissatisfied|refund|cancel|manager|escalate/gi) || []).length;
     
     let sentiment = "Neutral";
+    let customerMood = "Neutral";
+    let escalationRisk = "Low";
+
     if (negativeSentiments > positiveSentiments) {
       sentiment = negativeSentiments > 2 ? "Frustrated" : "Negative";
+      customerMood = negativeSentiments > 3 ? "Angry" : "Unhappy";
+      escalationRisk = lower.includes("manager") || lower.includes("escalate") ? "High" : "Medium";
     } else if (positiveSentiments > negativeSentiments) {
       sentiment = "Positive";
+      customerMood = "Satisfied";
     }
 
-    // Calculate heuristic score
-    let score = 70;
-    score += Math.min(positiveSentiments * 3, 15);
-    score -= Math.min(negativeSentiments * 4, 20);
-    if (transcript.includes("sorry") || transcript.includes("apologize")) score += 3;
-    if (transcript.match(/resolved|completed|finished|done/i)) score += 5;
+    // Calculate heuristic score dynamically
+    let score = 65; // Base average
+    score += Math.min(positiveSentiments * 4, 20);
+    score -= Math.min(negativeSentiments * 5, 25);
+    if (transcript.includes("sorry") || transcript.includes("apologize")) score += 4;
+    if (transcript.match(/resolved|completed|finished|done|helped/i)) score += 6;
+    
+    // Add some random natural variation to the fallback score so it's never exactly the same
+    score += Math.floor(Math.random() * 5) - 2; 
     score = Math.max(35, Math.min(95, score));
 
-    const hasGreeting = /hello|hi|good morning|namaste/i.test(transcript);
-    const hasClosure = /thank|goodbye|have a|take care/i.test(transcript);
+    const hasGreeting = /hello|hi|good morning|namaste|swagat/i.test(transcript);
+    const hasClosure = /thank|goodbye|have a|take care|dhanyawad/i.test(transcript);
+
+    let resolutionQuality = score > 80 ? "Excellent" : score > 60 ? "Average" : "Poor";
 
     return {
       language: this.detectLanguageFromTranscript(transcript),
       sentiment,
       score: Math.round(score),
-      openingStatus: hasGreeting ? "Professional" : "Direct",
-      tone: sentiment === "Frustrated" ? "Tense" : sentiment === "Positive" ? "Friendly" : "Neutral",
-      energyLevel: score > 80 ? "Engaged" : score > 60 ? "Calm" : "Low",
-      activeListening: /understand|see|hear|acknowledge/i.test(transcript) ? "Good" : "Fair",
-      summary: `Call transcribed. Sentiment detected: ${sentiment}. ${hasClosure ? "Call ended professionally." : ""}`,
+      openingStatus: hasGreeting ? "Warm and Professional" : "Direct",
+      tone: sentiment === "Frustrated" ? "Tense but Professional" : sentiment === "Positive" ? "Empathetic and Friendly" : "Neutral",
+      energyLevel: score > 80 ? "Highly Engaged" : score > 60 ? "Moderately Engaged" : "Low Energy",
+      activeListening: /understand|see|hear|acknowledge|samajh/i.test(transcript) ? "Strong" : "Fair",
+      summary: `Call transcribed and analyzed heuristically. Customer mood detected as ${customerMood}. ${hasClosure ? "Call concluded with standard closing." : ""}`,
       coachingFeedback: score > 80 
-        ? "Strong call handling. Maintain current approach." 
+        ? "Excellent handling of the customer's queries. Maintain this empathetic approach." 
         : score > 60 
-          ? "Good foundation. Focus on clarity and faster resolution." 
-          : "Review conversation pacing and customer empathy."
+          ? "Good foundation, but try to actively listen more and improve issue resolution speed." 
+          : "Review the call pacing. Focus on acknowledging the customer's frustration and offering clear solutions.",
+      customerMood,
+      resolutionQuality,
+      escalationRisk
     };
   }
 
   private detectLanguageFromTranscript(transcript: string): string {
     const devanagariCount = (transcript.match(/[\u0900-\u097F]/g) || []).length;
-    const hindiKeywords = /है|नहीं|क्या|मैं|आप|कृपया|मुझे/g.test(transcript);
+    const hindiKeywords = /है|नहीं|क्या|मैं|आप|कृपया|मुझे|नमस्ते|धन्यवाद/g.test(transcript);
     const marathiKeywords = /आहे|तुम्ही|काय|मला|झाले|बरं/g.test(transcript);
     
     if (devanagariCount > 20) {

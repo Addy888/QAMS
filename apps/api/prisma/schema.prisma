@@ -461,6 +461,10 @@ model Recording {
   transcription   String?  @db.Text
   summary         String?  @db.Text
   coachingFeedback String? @db.Text
+  
+  customerMood      String?
+  resolutionQuality String?
+  escalationRisk    String?
 
   createdAt  DateTime @default(now())
   updatedAt  DateTime @default(now()) @updatedAt
