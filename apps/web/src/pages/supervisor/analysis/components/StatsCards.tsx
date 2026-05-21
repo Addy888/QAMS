@@ -4,50 +4,39 @@ import StatCard from "@/components/ui/StatCard";
 import type { AnalysisRecord } from "@/services/analysis.service";
 import { api } from "@/services/api";
 
-interface StatsCardsProps {
-  data?: AnalysisRecord[];
-}
+const StatsCards = () => {
+  const [statsData, setStatsData] = useState({
+    totalCalls: 0,
+    processedCalls: 0,
+    pendingCalls: 0,
+    avgAiScore: 0,
+  });
 
-const StatsCards = ({ data }: StatsCardsProps) => {
-  const [records, setRecords] = useState<AnalysisRecord[]>(data ?? []);
+  const fetchStats = () => {
+    api.get("/analysis/stats")
+      .then((res) => {
+        if (res.data && res.data.success) {
+          setStatsData(res.data.data);
+        }
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
-    if (data) {
-      setRecords(data);
-    }
-  }, [data]);
+    // Initial fetch
+    fetchStats();
 
-  useEffect(() => {
-    if (!data) {
-      api.get("/analysis/recordings")
-        .then((res) => {
-          if (res.data && res.data.success) setRecords(res.data.data ?? []);
-        })
-        .catch(() => {});
-    }
-  }, [data]);
+    // Poll every 5 seconds for real-time updates
+    const intervalId = setInterval(fetchStats, 5000);
 
-  const total     = records.length;
-  const completed = records.filter((r) =>
-    r.status === "Completed"
-  ).length;
-  const pending   = records.filter((r) =>
-    r.status === "Pending" ||
-    r.status === "Processing" ||
-    r.status === "Uploading" ||
-    r.status === "Processing Audio" ||
-    r.status === "Generating Transcript" ||
-    r.status === "Detecting Language" ||
-    r.status === "Running AI Analysis" ||
-    r.status === "Saving Results" ||
-    r.status === "Retrying"
-  ).length;
-  const scores    = records
-    .map((r) => r.score)
-    .filter((s): s is number => s != null);
-  const avgScore  = scores.length
-    ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
-    : 0;
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const total = statsData.totalCalls;
+  const completed = statsData.processedCalls;
+  const pending = statsData.pendingCalls;
+  const avgScore = Math.round(statsData.avgAiScore);
+
 
   const stats = [
     {
@@ -70,7 +59,7 @@ const StatsCards = ({ data }: StatsCardsProps) => {
     },
     {
       label:       "Avg AI Score",
-      value:       scores.length ? `${avgScore}%` : "—",
+      value:       `${avgScore}%`,
       icon:        BarChart3,
       description: "Overall quality performance",
     },

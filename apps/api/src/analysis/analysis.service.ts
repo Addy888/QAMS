@@ -507,6 +507,39 @@ export class AnalysisService implements OnModuleInit {
     });
   }
 
+  async getDashboardStats() {
+    const total = await this.prisma.recording.count();
+    const completed = await this.prisma.recording.count({
+      where: { status: 'Completed' },
+    });
+    const pending = await this.prisma.recording.count({
+      where: {
+        status: {
+          notIn: ['Completed', 'Failed', 'Timeout'],
+        },
+      },
+    });
+
+    const avgScoreResult = await this.prisma.recording.aggregate({
+      _avg: {
+        score: true,
+      },
+      where: {
+        status: 'Completed',
+        score: {
+          not: null,
+        },
+      },
+    });
+
+    return {
+      totalCalls: total,
+      processedCalls: completed,
+      pendingCalls: pending,
+      avgAiScore: avgScoreResult._avg.score || 0,
+    };
+  }
+
   async reanalyzeCall(id: string) {
     const recording = await this.prisma.recording.findUnique({
       where: { id },

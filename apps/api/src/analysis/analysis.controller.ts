@@ -81,6 +81,15 @@ export class AnalysisController {
     };
   }
 
+  @Get('stats')
+  async getDashboardStats() {
+    const stats = await this.analysisService.getDashboardStats();
+    return {
+      success: true,
+      data: stats,
+    };
+  }
+
   @Get()
   async getAnalysis(@Query() query: any) {
     const records = await this.analysisService.getFilteredAnalysis(query);

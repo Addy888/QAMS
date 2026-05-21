@@ -338,7 +338,7 @@ const AnalysisDashboard = () => {
 
       <div className="space-y-8">
         <section>
-          <StatsCards data={analysisRecords} />
+          <StatsCards />
         </section>
 
         <section className="space-y-4">
