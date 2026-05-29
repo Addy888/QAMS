@@ -51,7 +51,11 @@ export class AnalysisService implements OnModuleInit {
             }
           });
           // Auto-enqueue them!
-          this.enqueueJob(rec.id);
+          if (process.env.NODE_ENV !== 'production') {
+            this.enqueueJob(rec.id);
+          } else {
+            this.logger.log(`[Queue] Production environment detected. Skipping auto-enqueue for job ${rec.id} to avoid Ollama startup crash.`);
+          }
         }
       }
     } catch (error: any) {

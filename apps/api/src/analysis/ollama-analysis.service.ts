@@ -142,24 +142,29 @@ ${transcript}`;
     temperature = 0.85,
     topP = 0.95
   ): Promise<AIAnalysisResult> {
-    const response = await axios.post(
-      `${url}/api/generate`,
-      {
-        model,
-        prompt,
-        stream: false,
-        format: "json",
-        options: {
-          temperature,
-          top_p: topP,
-          num_predict: 800,
+    try {
+      const response = await axios.post(
+        `${url}/api/generate`,
+        {
+          model,
+          prompt,
+          stream: false,
+          format: "json",
+          options: {
+            temperature,
+            top_p: topP,
+            num_predict: 800,
+          },
         },
-      },
-      { timeout }
-    );
+        { timeout }
+      );
 
-    const raw = response.data?.response || "";
-    return this.parseJSONSafely(raw, prompt);
+      const raw = response.data?.response || "";
+      return this.parseJSONSafely(raw, prompt);
+    } catch (error: any) {
+      this.logger.error(`Error in callOllama: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
