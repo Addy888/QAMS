@@ -1,13 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
-generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
-}
-
-datasource db {
-  provider = "mysql"
-}
+// This root-level schema.prisma is intentionally empty.
+// The real Prisma schema and all models live in apps/api/prisma/schema.prisma.
+// Do NOT add models or a generator here — doing so causes pnpm to hoist an
+// empty @prisma/client to the workspace root and shadow the API's generated client.
