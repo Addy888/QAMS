@@ -36,6 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const core_1 = require("@nestjs/core");
 const common_1 = require("@nestjs/common");
 const app_module_1 = require("./app.module");
+require("class-validator");
+require("class-transformer");
 const child_process_1 = require("child_process");
 const net = __importStar(require("net"));
 function getProcessOnPort(port) {
@@ -113,17 +115,24 @@ async function getAvailablePort(defaultPort) {
     return defaultPort;
 }
 async function bootstrap() {
-    const app = await core_1.NestFactory.create(app_module_1.AppModule);
-    app.enableCors();
-    app.useGlobalPipes(new common_1.ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-    }));
-    const defaultPort = 3000;
-    const PORT = await getAvailablePort(defaultPort);
-    await app.listen(PORT);
-    console.log(`QAMS API running on port ${PORT} 🚀`);
+    process.on('uncaughtException', console.error);
+    process.on('unhandledRejection', console.error);
+    try {
+        const app = await core_1.NestFactory.create(app_module_1.AppModule);
+        app.enableCors();
+        app.useGlobalPipes(new common_1.ValidationPipe({
+            whitelist: true,
+            forbidNonWhitelisted: true,
+            transform: true,
+        }));
+        const defaultPort = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+        const PORT = await getAvailablePort(defaultPort);
+        await app.listen(PORT);
+        console.log(`QAMS API running on port ${PORT} 🚀`);
+    }
+    catch (e) {
+        console.error("BOOTSTRAP ERROR:", e);
+    }
 }
 bootstrap();
 //# sourceMappingURL=main.js.map

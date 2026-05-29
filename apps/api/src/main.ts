@@ -1,6 +1,8 @@
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { AppModule } from "./app.module";
+import 'class-validator';
+import 'class-transformer';
 import { execSync } from "child_process";
 import * as net from "net";
 
@@ -83,21 +85,28 @@ async function getAvailablePort(defaultPort: number): Promise<number> {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  process.on('uncaughtException', console.error);
+  process.on('unhandledRejection', console.error);
 
-  app.enableCors();
+  try {
+    const app = await NestFactory.create(AppModule);
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
+    app.enableCors();
 
-  const defaultPort = 3000;
-  const PORT = await getAvailablePort(defaultPort);
-  await app.listen(PORT);
-  console.log(`QAMS API running on port ${PORT} 🚀`);
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
+
+    const defaultPort = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+    const PORT = await getAvailablePort(defaultPort);
+    await app.listen(PORT);
+    console.log(`QAMS API running on port ${PORT} 🚀`);
+  } catch (e) {
+    console.error("BOOTSTRAP ERROR:", e);
+  }
 }
 bootstrap();
