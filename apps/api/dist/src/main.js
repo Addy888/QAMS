@@ -114,11 +114,60 @@ async function getAvailablePort(defaultPort) {
     }
     return defaultPort;
 }
-async function bootstrap() {
-    process.on('uncaughtException', console.error);
-    process.on('unhandledRejection', console.error);
+async function runPreFlightChecks() {
+    console.log("--- STARTING PRE-FLIGHT DIAGNOSTICS ---");
+    const requiredEnv = ['DATABASE_URL', 'OLLAMA_URL', 'LOCAL_PYTHON_BIN'];
+    for (const env of requiredEnv) {
+        if (!process.env[env])
+            console.error(`[DIAGNOSTIC ERROR] Missing ENV VAR: ${env}`);
+        else
+            console.log(`[DIAGNOSTIC OK] ${env} = ${process.env[env]}`);
+    }
     try {
-        const app = await core_1.NestFactory.create(app_module_1.AppModule);
+        const { PrismaClient } = require('@prisma/client');
+        const prisma = new PrismaClient();
+        await prisma.$connect();
+        console.log("[DIAGNOSTIC OK] Prisma Database Connected.");
+        await prisma.$disconnect();
+    }
+    catch (e) {
+        console.error(`[DIAGNOSTIC ERROR] Prisma Connection Failed: ${e.message}`);
+        console.error(e.stack);
+    }
+    try {
+        const axios = require('axios');
+        const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+        await axios.get(ollamaUrl, { timeout: 2000 });
+        console.log("[DIAGNOSTIC OK] Ollama is reachable.");
+    }
+    catch (e) {
+        console.error(`[DIAGNOSTIC ERROR] Ollama Connection Failed: ${e.message}`);
+    }
+    try {
+        const { execSync } = require('child_process');
+        const pyBin = process.env.LOCAL_PYTHON_BIN || 'python';
+        const pyVer = execSync(`"${pyBin}" --version`, { encoding: 'utf8' }).trim();
+        console.log(`[DIAGNOSTIC OK] Python found: ${pyVer}`);
+    }
+    catch (e) {
+        console.error(`[DIAGNOSTIC ERROR] Python Executable Failed: ${e.message}`);
+    }
+    console.log("--- END PRE-FLIGHT DIAGNOSTICS ---");
+}
+async function bootstrap() {
+    process.on('uncaughtException', (err) => {
+        console.error("FATAL UNCAUGHT EXCEPTION:", err);
+        console.error(err.stack);
+    });
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error("FATAL UNHANDLED REJECTION:", reason);
+    });
+    try {
+        await runPreFlightChecks();
+        console.log("Initializing NestJS Application...");
+        const app = await core_1.NestFactory.create(app_module_1.AppModule, {
+            logger: ['error', 'warn', 'debug', 'log', 'verbose'],
+        });
         app.enableCors();
         app.useGlobalPipes(new common_1.ValidationPipe({
             whitelist: true,
@@ -131,7 +180,12 @@ async function bootstrap() {
         console.log(`QAMS API running on port ${PORT} 🚀`);
     }
     catch (e) {
-        console.error("BOOTSTRAP ERROR:", e);
+        console.error("=========================================");
+        console.error("BOOTSTRAP CRASH DETECTED");
+        console.error(`ERROR MESSAGE: ${e.message}`);
+        console.error(`STACK TRACE:\n${e.stack}`);
+        console.error("=========================================");
+        process.exit(1);
     }
 }
 bootstrap();
