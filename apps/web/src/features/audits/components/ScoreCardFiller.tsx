@@ -32,11 +32,7 @@ interface ScoreCardFillerProps {
   readOnly?: boolean;
 }
 
-const fieldClass = cn(
-  "h-9 w-full rounded-md border border-border bg-bg-elevated px-3 text-sm text-fg",
-  "placeholder:text-fg-subtle transition-colors",
-  "focus-visible:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring/40",
-);
+
 
 /**
  * Compact, single-row scorecard. Each question is rendered as one row

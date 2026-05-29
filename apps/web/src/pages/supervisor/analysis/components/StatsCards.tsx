@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Phone, CheckCircle, Clock, BarChart3 } from "lucide-react";
 import StatCard from "@/components/ui/StatCard";
-import type { AnalysisRecord } from "@/services/analysis.service";
+
 import { api } from "@/services/api";
 
 const StatsCards = () => {

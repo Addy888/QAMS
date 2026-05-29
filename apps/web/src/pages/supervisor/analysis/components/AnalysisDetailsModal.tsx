@@ -20,7 +20,7 @@ const AnalysisDetailsModal = ({
 
   const safeValue = (
     value: string | null | undefined,
-    processingFallback = record.status || "Processing...",
+    processingFallback: string = record.status || "Processing...",
   ) => {
     if (value) return value;
     if (isInProgress) return processingFallback;

@@ -21,12 +21,12 @@ export interface ListGroupedParams {
 }
 
 function toQueryParams(
-  params: Record<string, string | boolean | undefined>,
+  params: any,
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined) continue;
-    out[k] = typeof v === "boolean" ? String(v) : v;
+    out[k] = typeof v === "boolean" ? String(v) : String(v);
   }
   return out;
 }

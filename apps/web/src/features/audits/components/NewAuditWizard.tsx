@@ -34,7 +34,7 @@ import {
   discardAudit,
   getAudit,
   publishAudit,
-  setCorrectionNote,
+  setCorrectionNote as apiSetCorrectionNote,
   submitAudit,
   updateAudit,
   type UpdateAuditPayload,
@@ -650,18 +650,7 @@ export function NewAuditWizard({
     [scheduleAutosave],
   );
 
-  const onSectionRemark = useCallback(
-    (sectionId: number, remark: string) => {
-      setSectionRemarks((prev) => {
-        const next = { ...prev, [sectionId]: remark };
-        sectionRemarksRef.current = next;
-        return next;
-      });
-      dirtyRef.current.sectionIds.add(sectionId);
-      scheduleAutosave();
-    },
-    [scheduleAutosave],
-  );
+
 
   const onOverallComment = useCallback(
     (next: string) => {
@@ -947,7 +936,7 @@ export function NewAuditWizard({
     setSavingNote(true);
     try {
       const trimmed = correctionNote.trim();
-      const updated = await setCorrectionNote(
+      const updated = await apiSetCorrectionNote(
         audit.id,
         trimmed.length === 0 ? null : trimmed,
       );
