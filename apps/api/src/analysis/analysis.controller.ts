@@ -49,8 +49,13 @@ export class AnalysisController {
       storage: diskStorage({
         destination: (req, file, cb) => {
           const dir = path.join(process.cwd(), 'uploads', 'recordings');
-          if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
+          try {
+            if (!fs.existsSync(dir)) {
+              fs.mkdirSync(dir, { recursive: true });
+            }
+          } catch (err: any) {
+            console.warn(`[Upload] Cannot create upload directory (read-only FS?): ${err.message}`);
+            return cb(new Error('File uploads are not available in this environment (read-only filesystem).'), dir);
           }
           cb(null, dir);
         },

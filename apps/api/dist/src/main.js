@@ -38,154 +38,57 @@ const common_1 = require("@nestjs/common");
 const app_module_1 = require("./app.module");
 require("class-validator");
 require("class-transformer");
-const child_process_1 = require("child_process");
-const net = __importStar(require("net"));
-function getProcessOnPort(port) {
-    try {
-        const output = (0, child_process_1.execSync)(`netstat -ano | findstr :${port}`, { encoding: "utf8" });
-        const lines = output.split("\n");
-        for (const line of lines) {
-            if (line.includes("LISTENING")) {
-                const parts = line.trim().split(/\s+/);
-                const pid = parts[parts.length - 1];
-                if (pid) {
-                    return pid;
-                }
-            }
-        }
-    }
-    catch (err) {
-    }
-    return null;
-}
-function killProcess(pid) {
-    try {
-        const currentPid = process.pid.toString();
-        if (pid === currentPid) {
-            console.log(`[Port Handler] Target PID ${pid} is the current process. Skipping self-kill.`);
-            return false;
-        }
-        console.log(`[Port Handler] Killing process ${pid} on Windows using taskkill...`);
-        (0, child_process_1.execSync)(`taskkill /F /PID ${pid}`);
-        return true;
-    }
-    catch (err) {
-        console.error(`[Port Handler] Failed to kill process ${pid}:`, err.message);
-        return false;
-    }
-}
-async function isPortAvailable(port) {
-    return new Promise((resolve) => {
-        const server = net.createServer();
-        server.once("error", (err) => {
-            if (err.code === "EADDRINUSE") {
-                resolve(false);
-            }
-            else {
-                resolve(true);
-            }
-        });
-        server.once("listening", () => {
-            server.close();
-            resolve(true);
-        });
-        server.listen(port);
-    });
-}
-async function getAvailablePort(defaultPort) {
-    const ports = [defaultPort, defaultPort + 1, defaultPort + 2];
-    for (const port of ports) {
-        let available = await isPortAvailable(port);
-        if (!available) {
-            console.log(`[Port Handler] Port ${port} is occupied.`);
-            const pid = getProcessOnPort(port);
-            if (pid) {
-                const killed = killProcess(pid);
-                if (killed) {
-                    await new Promise((resolve) => setTimeout(resolve, 1000));
-                    available = await isPortAvailable(port);
-                }
-            }
-        }
-        if (available) {
-            return port;
-        }
-        console.log(`[Port Handler] Port ${port} is still occupied. Trying next port...`);
-    }
-    return defaultPort;
-}
-async function runPreFlightChecks() {
-    console.log("--- STARTING PRE-FLIGHT DIAGNOSTICS ---");
-    const requiredEnv = ['DATABASE_URL', 'OLLAMA_URL', 'LOCAL_PYTHON_BIN'];
-    for (const env of requiredEnv) {
-        if (!process.env[env])
-            console.error(`[DIAGNOSTIC ERROR] Missing ENV VAR: ${env}`);
-        else
-            console.log(`[DIAGNOSTIC OK] ${env} = ${process.env[env]}`);
-    }
-    try {
-        const { PrismaClient } = require('@prisma/client');
-        const prisma = new PrismaClient();
-        await prisma.$connect();
-        console.log("[DIAGNOSTIC OK] Prisma Database Connected.");
-        await prisma.$disconnect();
-    }
-    catch (e) {
-        console.error(`[DIAGNOSTIC ERROR] Prisma Connection Failed: ${e.message}`);
-        console.error(e.stack);
-    }
-    try {
-        const axios = require('axios');
-        const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
-        await axios.get(ollamaUrl, { timeout: 2000 });
-        console.log("[DIAGNOSTIC OK] Ollama is reachable.");
-    }
-    catch (e) {
-        console.error(`[DIAGNOSTIC ERROR] Ollama Connection Failed: ${e.message}`);
-    }
-    try {
-        const { execSync } = require('child_process');
-        const pyBin = process.env.LOCAL_PYTHON_BIN || 'python';
-        const pyVer = execSync(`"${pyBin}" --version`, { encoding: 'utf8' }).trim();
-        console.log(`[DIAGNOSTIC OK] Python found: ${pyVer}`);
-    }
-    catch (e) {
-        console.error(`[DIAGNOSTIC ERROR] Python Executable Failed: ${e.message}`);
-    }
-    console.log("--- END PRE-FLIGHT DIAGNOSTICS ---");
-}
+const http = __importStar(require("http"));
 async function bootstrap() {
-    process.on('uncaughtException', (err) => {
-        console.error("FATAL UNCAUGHT EXCEPTION:", err);
+    process.on("uncaughtException", (err) => {
+        console.error("[FATAL] uncaughtException:", err.message);
         console.error(err.stack);
     });
-    process.on('unhandledRejection', (reason, promise) => {
-        console.error("FATAL UNHANDLED REJECTION:", reason);
+    process.on("unhandledRejection", (reason) => {
+        console.error("[FATAL] unhandledRejection:", reason?.message ?? reason);
+        if (reason?.stack)
+            console.error(reason.stack);
     });
+    console.log("=== QAMS BOOTSTRAP START ===");
+    console.log(`NODE_ENV = ${process.env.NODE_ENV}`);
+    console.log(`DATABASE_URL = ${process.env.DATABASE_URL ? "[SET]" : "[MISSING]"}`);
+    console.log(`OLLAMA_URL = ${process.env.OLLAMA_URL ?? "[NOT SET]"}`);
+    console.log(`LOCAL_PYTHON_BIN = ${process.env.LOCAL_PYTHON_BIN ?? "[NOT SET]"}`);
+    const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
     try {
-        await runPreFlightChecks();
-        console.log("Initializing NestJS Application...");
+        console.log("[BOOT] Creating NestFactory...");
         const app = await core_1.NestFactory.create(app_module_1.AppModule, {
-            logger: ['error', 'warn', 'debug', 'log', 'verbose'],
+            logger: ["error", "warn", "log", "debug", "verbose"],
         });
+        console.log("[BOOT] NestFactory created successfully.");
         app.enableCors();
         app.useGlobalPipes(new common_1.ValidationPipe({
             whitelist: true,
             forbidNonWhitelisted: true,
             transform: true,
         }));
-        const defaultPort = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-        const PORT = await getAvailablePort(defaultPort);
         await app.listen(PORT);
-        console.log(`QAMS API running on port ${PORT} 🚀`);
+        console.log(`[BOOT] QAMS API running on port ${PORT} 🚀`);
     }
     catch (e) {
         console.error("=========================================");
         console.error("BOOTSTRAP CRASH DETECTED");
-        console.error(`ERROR MESSAGE: ${e.message}`);
-        console.error(`STACK TRACE:\n${e.stack}`);
+        console.error(`ERROR: ${e.message}`);
+        console.error(`STACK:\n${e.stack}`);
         console.error("=========================================");
-        process.exit(1);
+        console.error("[BOOT] Starting graceful fallback HTTP server to prevent Vercel 500 error.");
+        const fallbackServer = http.createServer((req, res) => {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                success: false,
+                error: "Application failed to start.",
+                message: e.message,
+                stack: process.env.NODE_ENV === 'production' ? "Hidden in production" : e.stack
+            }));
+        });
+        fallbackServer.listen(PORT, () => {
+            console.log(`[BOOT] Graceful fallback server listening on port ${PORT}`);
+        });
     }
 }
 bootstrap();

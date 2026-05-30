@@ -34,6 +34,11 @@ export class RecordingScannerService {
 
   @Cron('*/30 * * * * *') // Run every 30 seconds
   async scanRecordings() {
+    // Skip scanning entirely in production (Vercel has no local filesystem with recordings)
+    if (process.env.NODE_ENV === 'production') {
+      return;
+    }
+
     if (this.isScanning) {
       return;
     }
@@ -41,10 +46,21 @@ export class RecordingScannerService {
 
     try {
       if (!fs.existsSync(this.recordingsPath)) {
-        fs.mkdirSync(this.recordingsPath, { recursive: true });
+        try {
+          fs.mkdirSync(this.recordingsPath, { recursive: true });
+        } catch (mkdirErr: any) {
+          this.logger.warn(`[Scanner] Cannot create recordings directory (read-only filesystem?): ${mkdirErr.message}`);
+          return;
+        }
       }
 
-      const files = fs.readdirSync(this.recordingsPath);
+      let files: string[] = [];
+      try {
+        files = fs.readdirSync(this.recordingsPath);
+      } catch (readErr: any) {
+        this.logger.warn(`[Scanner] Cannot read recordings directory: ${readErr.message}`);
+        return;
+      }
       
       const audioFiles = files.filter(file => {
         const ext = path.extname(file).toLowerCase();
@@ -60,39 +76,43 @@ export class RecordingScannerService {
       let newFilesCount = 0;
 
       for (const file of audioFiles) {
-        const audioPath = `uploads/recordings/${file}`;
-        
-        // Check if exists
-        const existing = await this.prisma.recording.findFirst({
-          where: { audioPath },
-        });
-
-        if (existing) {
-          this.processedFiles.add(file);
-          continue; // SKIP
-        }
-
-        newFilesCount++;
-        this.processedFiles.add(file);
-
-        // INSERT
-        const newRecording = await this.prisma.recording.create({
-          data: {
-            agentId: this.deriveAgentId(audioPath),
-            audioPath,
-            status: 'Pending',
-            statusReason: 'Discovered on disk. Queued for transcription...',
-          },
-        });
-
-        console.log(`[DB] Inserted recording`);
-
-        // Trigger AI analysis automatically
         try {
-          await this.analysisService.analyzeRecording(newRecording.id);
-          console.log(`[AI] Analysis started`);
-        } catch (error: any) {
-          console.error(`Failed to start analysis for ${file}: ${error.message}`);
+          const audioPath = `uploads/recordings/${file}`;
+          
+          // Check if exists
+          const existing = await this.prisma.recording.findFirst({
+            where: { audioPath },
+          });
+
+          if (existing) {
+            this.processedFiles.add(file);
+            continue; // SKIP
+          }
+
+          newFilesCount++;
+          this.processedFiles.add(file);
+
+          // INSERT
+          const newRecording = await this.prisma.recording.create({
+            data: {
+              agentId: this.deriveAgentId(audioPath),
+              audioPath,
+              status: 'Pending',
+              statusReason: 'Discovered on disk. Queued for transcription...',
+            },
+          });
+
+          console.log(`[DB] Inserted recording ${newRecording.id}`);
+
+          // Trigger AI analysis automatically
+          try {
+            await this.analysisService.analyzeRecording(newRecording.id);
+            console.log(`[AI] Analysis started for ${newRecording.id}`);
+          } catch (error: any) {
+            console.error(`Failed to start analysis for ${file}: ${error.message}`);
+          }
+        } catch (itemErr: any) {
+           console.error(`[Scanner] Error processing individual file ${file}: ${itemErr.message}`);
         }
       }
 
@@ -101,7 +121,11 @@ export class RecordingScannerService {
       }
 
     } catch (error: any) {
-      this.logger.error(`Scanner failed: ${error.message}`);
+      this.logger.error("=========================================");
+      this.logger.error(`[Scanner] scanRecordings FAILED ENTIRELY`);
+      this.logger.error(`[Scanner] ERROR: ${error.message}`);
+      this.logger.error(`[Scanner] Full stack trace:\n${error.stack}`);
+      this.logger.error("=========================================");
     } finally {
       this.isScanning = false;
     }

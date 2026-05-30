@@ -49,7 +49,11 @@ export function getRecordingsDirectory() {
 export function ensureRecordingsDirectory() {
   const recordingsDir = getRecordingsDirectory();
   if (!fs.existsSync(recordingsDir)) {
-    fs.mkdirSync(recordingsDir, { recursive: true });
+    try {
+      fs.mkdirSync(recordingsDir, { recursive: true });
+    } catch (err: any) {
+      console.warn(`[runtime-paths] Cannot create recordings directory (read-only FS?): ${err.message}`);
+    }
   }
   return recordingsDir;
 }

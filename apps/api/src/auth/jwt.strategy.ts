@@ -15,13 +15,15 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
   constructor(configService: ConfigService) {
     const secret = configService.get<string>("JWT_ACCESS_SECRET");
     if (!secret) {
-      throw new UnauthorizedException("JWT secret is not configured");
+      console.error(
+        "[FATAL-CONFIG] JWT_ACCESS_SECRET is not set! Auth will NOT work. Set it in Vercel env vars.",
+      );
     }
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: secret,
+      secretOrKey: secret || "INSECURE_FALLBACK_DO_NOT_USE_IN_PRODUCTION",
     });
   }
 

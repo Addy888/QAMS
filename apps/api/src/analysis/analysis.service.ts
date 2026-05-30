@@ -30,7 +30,8 @@ export class AnalysisService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    this.logger.log("[Queue] Initializing AnalysisService Queue and clearing stale states...");
+    this.logger.log("=========================================");
+    this.logger.log("[Queue] INITIALIZING SERVICE...");
     try {
       const staleRecordings = await this.prisma.recording.findMany({
         where: {
@@ -41,7 +42,7 @@ export class AnalysisService implements OnModuleInit {
       });
 
       if (staleRecordings.length > 0) {
-        this.logger.log(`[Queue] Found ${staleRecordings.length} stale recordings in database. Resetting to Pending for retry...`);
+        this.logger.log(`[Queue] Found ${staleRecordings.length} stale recordings. Resetting to Pending...`);
         for (const rec of staleRecordings) {
           await this.prisma.recording.update({
             where: { id: rec.id },
@@ -50,24 +51,36 @@ export class AnalysisService implements OnModuleInit {
               statusReason: "Server restarted. Resetting state to Pending for retry...",
             }
           });
-          // Auto-enqueue them!
           if (process.env.NODE_ENV !== 'production') {
             this.enqueueJob(rec.id);
           } else {
-            this.logger.log(`[Queue] Production environment detected. Skipping auto-enqueue for job ${rec.id} to avoid Ollama startup crash.`);
+            this.logger.log(`[Queue] Production: skipping auto-enqueue for ${rec.id}`);
           }
         }
       }
-    } catch (error: any) {
-      this.logger.error(`[Queue] Failed to clear stale states on startup: ${error.message}`);
-    }
 
-    // Start background monitor for stalled jobs
-    if (!this.staleJobInterval) {
-      this.staleJobInterval = setInterval(() => this.monitorStalledJobs(), 15000);
-      if (this.staleJobInterval && typeof this.staleJobInterval.unref === 'function') {
-        this.staleJobInterval.unref();
+      // Start background monitor for stalled jobs (only in non-serverless environments)
+      if (process.env.NODE_ENV !== 'production') {
+        if (!this.staleJobInterval) {
+          this.staleJobInterval = setInterval(() => this.monitorStalledJobs(), 15000);
+          if (this.staleJobInterval && typeof this.staleJobInterval.unref === 'function') {
+            this.staleJobInterval.unref();
+          }
+        }
+      } else {
+        this.logger.log("[Queue] Production: skipping setInterval stale-job monitor.");
       }
+
+      this.logger.log("[Queue] AnalysisService initialized successfully.");
+      this.logger.log("=========================================");
+    } catch (error: any) {
+      this.logger.error("=========================================");
+      this.logger.error(`[Queue] ON_MODULE_INIT CRASH DETECTED`);
+      this.logger.error(`[Queue] ERROR: ${error.message}`);
+      this.logger.error(`[Queue] Full stack trace:\n${error.stack}`);
+      this.logger.error("[Queue] GRACEFUL FALLBACK: App will boot despite failure in resetting stale jobs.");
+      this.logger.error("=========================================");
+      // DO NOT re-throw — let the app boot
     }
   }
 

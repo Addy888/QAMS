@@ -69,26 +69,40 @@ let UsersService = class UsersService {
         this.prisma = prisma;
     }
     async onModuleInit() {
-        const passwordHash = await bcrypt.hash("12345678", BCRYPT_ROUNDS);
-        const defaultUser = await this.findByUsername("supervisor");
-        if (!defaultUser) {
-            await this.createUser({
-                username: "supervisor",
-                passwordHash,
-                name: "Default Supervisor",
-                role: "ADMIN",
-            });
-            console.log("Seeded default supervisor admin user.");
-        }
-        else {
-            await this.prisma.user.update({
-                where: { id: defaultUser.id },
-                data: {
+        try {
+            console.log("=========================================");
+            console.log("[UsersService] INITIALIZING SERVICE...");
+            console.log("[UsersService] Seeding default user...");
+            const passwordHash = await bcrypt.hash("12345678", BCRYPT_ROUNDS);
+            const defaultUser = await this.findByUsername("supervisor");
+            if (!defaultUser) {
+                await this.createUser({
+                    username: "supervisor",
                     passwordHash,
+                    name: "Default Supervisor",
                     role: "ADMIN",
-                },
-            });
-            console.log("Updated existing supervisor user with default credentials.");
+                });
+                console.log("[UsersService] Seeded default supervisor admin user.");
+            }
+            else {
+                await this.prisma.user.update({
+                    where: { id: defaultUser.id },
+                    data: {
+                        passwordHash,
+                        role: "ADMIN",
+                    },
+                });
+                console.log("[UsersService] Updated existing supervisor user with default credentials.");
+            }
+            console.log("=========================================");
+        }
+        catch (error) {
+            console.error("=========================================");
+            console.error(`[UsersService] ON_MODULE_INIT CRASH DETECTED`);
+            console.error(`[UsersService] ERROR: ${error.message}`);
+            console.error(`[UsersService] Full stack trace:\n${error.stack}`);
+            console.error("[UsersService] GRACEFUL FALLBACK: Boot process continuing despite user seed failure.");
+            console.error("=========================================");
         }
     }
     async findByUsername(username) {
