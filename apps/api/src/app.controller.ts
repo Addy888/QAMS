@@ -6,7 +6,19 @@ export class AppController {
   constructor(private readonly appService: AppService) {}
 
   @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  root() {
+    return {
+      service: 'QAMS API',
+      status: 'running'
+    };
+  }
+
+  @Get('/health')
+  health() {
+    return {
+      status: 'healthy',
+      service: 'QAMS API',
+      timestamp: new Date().toISOString()
+    };
   }
 }

@@ -16,9 +16,10 @@ async function bootstrap() {
     if (reason?.stack) console.error(reason.stack);
   });
 
-  console.log("=== QAMS BOOTSTRAP START ===");
-  console.log(`NODE_ENV = ${process.env.NODE_ENV}`);
-  console.log(`DATABASE_URL = ${process.env.DATABASE_URL ? "[SET]" : "[MISSING]"}`);
+  console.log('=== QAMS BOOTSTRAP START ===');
+  console.log('QAMS API STARTED');
+  console.log('NODE_ENV:', process.env.NODE_ENV);
+  console.log('DATABASE_URL EXISTS:', !!process.env.DATABASE_URL);
   console.log(`OLLAMA_URL = ${process.env.OLLAMA_URL ?? "[NOT SET]"}`);
   console.log(`LOCAL_PYTHON_BIN = ${process.env.LOCAL_PYTHON_BIN ?? "[NOT SET]"}`);
 
